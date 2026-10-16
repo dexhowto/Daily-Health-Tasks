@@ -296,6 +296,9 @@ impl ControlCenter {
     pub fn refresh(&self, state: &AppState) {
         let worked = state.activity.active_work_seconds;
         let timer = match state.activity.status {
+            ActivityStatus::AwayOnBreak if state.activity.break_grace_secs > 0 => {
+                format!("Break · {}s", state.activity.break_grace_secs)
+            }
             ActivityStatus::AwayOnBreak => "On break".to_string(),
             ActivityStatus::WaitingForInput => "Ready".to_string(),
             ActivityStatus::NoticeDue => format!("{:02}:{:02} · break!", worked / 60, worked % 60),

@@ -138,7 +138,14 @@ pub struct ActivitySession {
     pub last_break_time: Option<String>,
     pub last_idle_seconds: f64,
     pub notices_sent_today: u32,
+    /// Seconds left in which input is ignored after "Take a Break", so the
+    /// click itself doesn't start a new session (not persisted).
+    #[serde(skip)]
+    pub break_grace_secs: u32,
 }
+
+/// How long input is ignored after the user starts a break manually.
+pub const BREAK_GRACE_SECS: u32 = 30;
 
 impl Default for ActivitySession {
     fn default() -> Self {
@@ -149,6 +156,7 @@ impl Default for ActivitySession {
             last_break_time: None,
             last_idle_seconds: 0.0,
             notices_sent_today: 0,
+            break_grace_secs: 0,
         }
     }
 }

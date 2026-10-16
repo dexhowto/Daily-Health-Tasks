@@ -77,11 +77,18 @@ fn session_display(state: &AppState) -> SessionDisplay {
             },
             ratio: 1.0,
         },
+        ActivityStatus::AwayOnBreak if state.activity.break_grace_secs > 0 => SessionDisplay {
+            pill: "On break",
+            tint: NSColor::systemGreenColor(),
+            value: format_mmss(state.activity.break_grace_secs),
+            detail: "Break started · after this, any key or mouse move starts a new session".into(),
+            ratio: 0.0,
+        },
         ActivityStatus::AwayOnBreak => SessionDisplay {
             pill: "On break",
             tint: NSColor::systemGreenColor(),
             value: format_mmss(state.activity.last_idle_seconds as u32),
-            detail: "Away from keyboard · session resets when the break is long enough".into(),
+            detail: "Press any key or move the mouse to start a new session".into(),
             ratio: 0.0,
         },
     }

@@ -4,7 +4,7 @@ use chrono::Local;
 use crate::audio::SoundEffects;
 use crate::models::{
     ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
-    TimerState,
+    TimerState, BREAK_GRACE_SECS,
 };
 use crate::storage::StorageManager;
 
@@ -157,6 +157,13 @@ impl AppState {
         idle_seconds: f64,
     ) -> Option<(String, String, String, bool, bool)> {
         self.activity.last_idle_seconds = idle_seconds;
+
+        // Just after "Take a Break": stay on break whatever the input, then
+        // the next key press or mouse move starts a new session (step 2).
+        if self.activity.break_grace_secs > 0 {
+            self.activity.break_grace_secs -= 1;
+            return None;
+        }
         let idle_reset_secs = (self.settings.idle_reset_minutes * 60) as f64;
         let work_limit_secs = self.settings.work_interval_minutes * 60;
 
@@ -212,6 +219,7 @@ impl AppState {
     pub fn manual_take_break(&mut self) {
         self.activity.status = ActivityStatus::AwayOnBreak;
         self.activity.active_work_seconds = 0;
+        self.activity.break_grace_secs = BREAK_GRACE_SECS;
         self.activity.last_break_time = Some(Local::now().format("%H:%M:%S").to_string());
         self.today.breaks_taken += 1;
         if self.settings.sound_enabled {
@@ -248,6 +256,9 @@ impl AppState {
             }
             ActivityStatus::NoticeDue => {
                 format!("⚠️ {:02}:{:02} - Break Due!", mins, secs)
+            }
+            ActivityStatus::AwayOnBreak if self.activity.break_grace_secs > 0 => {
+                format!("🌿 Break · input paused {:02}", self.activity.break_grace_secs)
             }
             ActivityStatus::AwayOnBreak => {
                 let away_mins = (self.activity.last_idle_seconds / 60.0).floor() as u32;
