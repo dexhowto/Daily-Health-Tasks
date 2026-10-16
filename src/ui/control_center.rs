@@ -95,11 +95,10 @@ impl ControlCenter {
         UIComponents::add_full_width(&expanded, &header);
 
         // Quick actions.
-        let actions: [(&str, &str, Retained<NSColor>, Sel); 4] = [
+        let actions: [(&str, &str, Retained<NSColor>, Sel); 3] = [
             ("Water", "drop.fill", NSColor::systemBlueColor(), sel!(onAddWater250:)),
             ("Coffee", "cup.and.saucer.fill", NSColor::systemBrownColor(), sel!(onAddCoffee:)),
             ("Break", "figure.walk", NSColor::systemGreenColor(), sel!(onManualTakeBreak:)),
-            ("Open", "macwindow", NSColor::systemIndigoColor(), sel!(onShowDashboard:)),
         ];
         let action_views: Vec<Retained<NSView>> = actions
             .iter()
@@ -129,6 +128,20 @@ impl ControlCenter {
         expanded.setCustomSpacing_afterView(6.0, &tasks_caption);
         let task_rows = UIComponents::create_v_stack(6.0, mtm);
         UIComponents::add_full_width(&expanded, &task_rows);
+
+        // Footer: app shortcuts. Add further options to this row.
+        UIComponents::add_full_width(&expanded, &UIComponents::create_separator(mtm));
+        let footer_buttons = [Self::footer_button(
+            "Open Dashboard",
+            "macwindow",
+            &NSColor::systemIndigoColor(),
+            target,
+            sel!(onShowDashboard:),
+            mtm,
+        )];
+        let footer_refs: Vec<&NSView> = footer_buttons.iter().map(|v| &**v).collect();
+        let footer = UIComponents::create_equal_row(&footer_refs, 8.0, mtm);
+        UIComponents::add_full_width(&expanded, &footer);
 
         // --- Collapsed tile ---
         let tile = DragIcon::new_tile(mtm);
@@ -229,7 +242,28 @@ impl ControlCenter {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageAbove);
         }
-        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, mtm)))
+        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 58.0, mtm)))
+    }
+
+    /// Wide shortcut button with a leading icon, used in the footer.
+    fn footer_button(
+        title: &str,
+        symbol: &str,
+        tint: &NSColor,
+        target: &AnyObject,
+        action: Sel,
+        mtm: MainThreadMarker,
+    ) -> Retained<NSView> {
+        let btn = unsafe {
+            NSButton::buttonWithTitle_target_action(&NSString::from_str(title), Some(target), Some(action), mtm)
+        };
+        btn.setBordered(false);
+        btn.setFont(Some(&NSFont::systemFontOfSize_weight(12.0, WEIGHT_SEMIBOLD)));
+        if let Some(img) = UIComponents::symbol(symbol, 13.0, WEIGHT_SEMIBOLD) {
+            btn.setImage(Some(&img));
+            btn.setImagePosition(NSCellImagePosition::ImageLeading);
+        }
+        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 34.0, mtm)))
     }
 
     fn stat_row(
@@ -733,12 +767,12 @@ define_class!(
 );
 
 impl HoverTile {
-    fn new(tint: &NSColor, button: Retained<NSButton>, mtm: MainThreadMarker) -> Retained<Self> {
+    fn new(tint: &NSColor, button: Retained<NSButton>, height: f64, mtm: MainThreadMarker) -> Retained<Self> {
         let this = mtm.alloc::<Self>().set_ivars(HoverTileIvars {
             tint: tint.retain(),
             button: std::cell::OnceCell::new(),
         });
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(60.0, 58.0));
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(60.0, height));
         let tile: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         tile.setBoxType(objc2_app_kit::NSBoxType::Custom);
         tile.setTitlePosition(objc2_app_kit::NSTitlePosition::NoTitle);
@@ -746,7 +780,7 @@ impl HoverTile {
         tile.setCornerRadius(10.0);
         tile.setBorderWidth(0.0);
         tile.setTranslatesAutoresizingMaskIntoConstraints(false);
-        tile.heightAnchor().constraintEqualToConstant(58.0).setActive(true);
+        tile.heightAnchor().constraintEqualToConstant(height).setActive(true);
 
         button.setContentTintColor(Some(tint));
         button.setTranslatesAutoresizingMaskIntoConstraints(false);
