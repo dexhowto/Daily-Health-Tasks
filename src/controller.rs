@@ -11,7 +11,7 @@ use crate::reminders;
 use crate::screen_recording;
 use crate::app_state;
 use crate::menu_bar::MenuBarManager;
-use crate::models::{BreakType, CoffeeKind};
+use crate::models::{BreakType, CoffeeKind, ExerciseKind};
 use crate::notifier::Notifier;
 use crate::ui::control_center::ControlCenter;
 use crate::ui::MainWindow;
@@ -96,6 +96,14 @@ pub fn add_water(amount_ml: i32) {
     {
         let mut state = app_state::state().lock().unwrap();
         state.add_water(amount_ml);
+    }
+    refresh_all();
+}
+
+pub fn log_exercise(kind: ExerciseKind) {
+    {
+        let mut state = app_state::state().lock().unwrap();
+        state.log_exercise(kind);
     }
     refresh_all();
 }

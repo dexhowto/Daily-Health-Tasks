@@ -4,7 +4,7 @@ use objc2_app_kit::{NSButton, NSMenuItem, NSSegmentedControl};
 use objc2_foundation::{MainThreadMarker, NSObject};
 
 use crate::controller;
-use crate::models::CoffeeKind;
+use crate::models::{CoffeeKind, ExerciseKind};
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -51,6 +51,21 @@ define_class!(
         #[unsafe(method(onAddLatte:))]
         fn on_add_latte(&self, _sender: &NSObject) {
             controller::log_coffee(Some(CoffeeKind::Latte));
+        }
+
+        #[unsafe(method(onLogPlank:))]
+        fn on_log_plank(&self, _sender: &NSObject) {
+            controller::log_exercise(ExerciseKind::Plank);
+        }
+
+        #[unsafe(method(onLogStretching:))]
+        fn on_log_stretching(&self, _sender: &NSObject) {
+            controller::log_exercise(ExerciseKind::Stretching);
+        }
+
+        #[unsafe(method(onLogWalk:))]
+        fn on_log_walk(&self, _sender: &NSObject) {
+            controller::log_exercise(ExerciseKind::Walk);
         }
 
         #[unsafe(method(onUndoCoffee:))]

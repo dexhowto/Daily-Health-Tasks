@@ -10,7 +10,7 @@ use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSCellImagePosition, NSColor, NSControlSize, NSEvent, NSFont,
-    NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBox, NSImageView, NSLayoutConstraintOrientation,
+    NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBox, NSImage, NSImageView, NSLayoutConstraintOrientation,
     NSLineBreakMode, NSPanel, NSScreen, NSStackView, NSStackViewGravity, NSTextField, NSView,
     NSTrackingArea, NSTrackingAreaOptions, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -95,18 +95,29 @@ impl ControlCenter {
         UIComponents::add_full_width(&expanded, &header);
 
         // Quick actions.
-        let actions: [(&str, &str, Retained<NSColor>, Sel); 3] = [
-            ("Water", "drop.fill", NSColor::systemBlueColor(), sel!(onAddWater250:)),
-            ("Coffee", "cup.and.saucer.fill", NSColor::systemBrownColor(), sel!(onAddCoffee:)),
-            ("Break", "figure.walk", NSColor::systemGreenColor(), sel!(onManualTakeBreak:)),
+        // Quick actions, then exercises; both show a plus on hover.
+        let rows: [[(&str, &str, Retained<NSColor>, Sel); 3]; 2] = [
+            [
+                ("Water", "drop.fill", NSColor::systemBlueColor(), sel!(onAddWater250:)),
+                ("Coffee", "cup.and.saucer.fill", NSColor::systemBrownColor(), sel!(onAddCoffee:)),
+                ("Break", "pause.circle.fill", NSColor::systemGreenColor(), sel!(onManualTakeBreak:)),
+            ],
+            [
+                ("Plank", "figure.core.training", NSColor::systemOrangeColor(), sel!(onLogPlank:)),
+                ("Stretching", "figure.flexibility", NSColor::systemPurpleColor(), sel!(onLogStretching:)),
+                ("Walk", "figure.walk", NSColor::systemTealColor(), sel!(onLogWalk:)),
+            ],
         ];
-        let action_views: Vec<Retained<NSView>> = actions
-            .iter()
-            .map(|(title, symbol, tint, action)| Self::action_tile(title, symbol, tint, target, *action, mtm))
-            .collect();
-        let action_refs: Vec<&NSView> = action_views.iter().map(|v| &**v).collect();
-        let action_row = UIComponents::create_equal_row(&action_refs, 8.0, mtm);
-        UIComponents::add_full_width(&expanded, &action_row);
+        let action_rows = UIComponents::create_v_stack(8.0, mtm);
+        for row in &rows {
+            let views: Vec<Retained<NSView>> = row
+                .iter()
+                .map(|(title, symbol, tint, action)| Self::action_tile(title, symbol, tint, target, *action, mtm))
+                .collect();
+            let refs: Vec<&NSView> = views.iter().map(|v| &**v).collect();
+            UIComponents::add_full_width(&action_rows, &UIComponents::create_equal_row(&refs, 8.0, mtm));
+        }
+        UIComponents::add_full_width(&expanded, &action_rows);
 
         // Stats.
         let (water_row, water_value, water_bar) =
@@ -242,7 +253,8 @@ impl ControlCenter {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageAbove);
         }
-        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 58.0, mtm)))
+        let plus = UIComponents::symbol("plus.circle.fill", 16.0, WEIGHT_SEMIBOLD);
+        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 58.0, plus, mtm)))
     }
 
     /// Wide shortcut button with a leading icon, used in the footer.
@@ -263,7 +275,7 @@ impl ControlCenter {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageLeading);
         }
-        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 34.0, mtm)))
+        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 34.0, None, mtm)))
     }
 
     fn stat_row(
@@ -726,6 +738,9 @@ fn track_hover(view: &NSView, mtm: MainThreadMarker) {
 pub struct HoverTileIvars {
     tint: Retained<NSColor>,
     button: std::cell::OnceCell<Retained<NSButton>>,
+    /// Button icon, and the one shown while hovered (e.g. a plus), if any.
+    image: Option<Retained<NSImage>>,
+    hover_image: Option<Retained<NSImage>>,
 }
 
 define_class!(
@@ -770,10 +785,18 @@ define_class!(
 );
 
 impl HoverTile {
-    fn new(tint: &NSColor, button: Retained<NSButton>, height: f64, mtm: MainThreadMarker) -> Retained<Self> {
+    fn new(
+        tint: &NSColor,
+        button: Retained<NSButton>,
+        height: f64,
+        hover_image: Option<Retained<NSImage>>,
+        mtm: MainThreadMarker,
+    ) -> Retained<Self> {
         let this = mtm.alloc::<Self>().set_ivars(HoverTileIvars {
             tint: tint.retain(),
             button: std::cell::OnceCell::new(),
+            image: button.image(),
+            hover_image,
         });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(60.0, height));
         let tile: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
@@ -810,6 +833,10 @@ impl HoverTile {
         if let Some(button) = ivars.button.get() {
             let tint = if on { NSColor::whiteColor() } else { ivars.tint.clone() };
             button.setContentTintColor(Some(&tint));
+            if let Some(hover_image) = &ivars.hover_image {
+                let image = if on { Some(hover_image) } else { ivars.image.as_ref() };
+                button.setImage(image.map(|i| &**i));
+            }
         }
     }
 }

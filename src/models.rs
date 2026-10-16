@@ -250,6 +250,30 @@ pub struct CoffeeEntry {
     pub kind: CoffeeKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExerciseKind {
+    Plank,
+    Stretching,
+    Walk,
+}
+
+impl ExerciseKind {
+    /// Daily routine this exercise counts toward, and by how much.
+    pub fn routine(&self) -> (&'static str, u32) {
+        match self {
+            ExerciseKind::Plank => ("exercise", 1), // +1 min of movement
+            ExerciseKind::Stretching => ("stand_stretch", 1), // +1 session
+            ExerciseKind::Walk => ("exercise", 10), // +10 min of movement
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExerciseEntry {
+    pub time: String, // HH:MM local
+    pub kind: ExerciseKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyRecord {
     pub date: String, // YYYY-MM-DD
@@ -259,6 +283,8 @@ pub struct DailyRecord {
     pub breaks_taken: u32,
     #[serde(default)]
     pub coffee_log: Vec<CoffeeEntry>,
+    #[serde(default)]
+    pub exercise_log: Vec<ExerciseEntry>,
 }
 
 impl DailyRecord {
@@ -334,6 +360,7 @@ impl DailyRecord {
             tasks: default_tasks,
             breaks_taken: 0,
             coffee_log: Vec::new(),
+            exercise_log: Vec::new(),
         }
     }
 

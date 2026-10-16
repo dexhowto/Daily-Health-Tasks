@@ -4,7 +4,7 @@ use chrono::Local;
 use crate::audio::SoundEffects;
 use crate::models::{
     ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
-    TimerState, BREAK_GRACE_SECS,
+    ExerciseEntry, ExerciseKind, TimerState, BREAK_GRACE_SECS,
 };
 use crate::storage::StorageManager;
 
@@ -69,6 +69,18 @@ impl AppState {
             SoundEffects::play_named("Pop");
         }
         self.save();
+    }
+
+    pub fn log_exercise(&mut self, kind: ExerciseKind) {
+        self.today.exercise_log.push(ExerciseEntry {
+            time: Local::now().format("%H:%M").to_string(),
+            kind,
+        });
+        if self.settings.sound_enabled {
+            SoundEffects::play_named("Pop");
+        }
+        let (routine, amount) = kind.routine();
+        self.increment_task(routine, amount); // also saves
     }
 
     pub fn undo_coffee(&mut self) {
