@@ -11,7 +11,8 @@ use objc2_foundation::{MainThreadMarker, NSString};
 use crate::action_handler::HealthTasksActionHandler;
 use crate::app_state::AppState;
 use crate::models::{
-    ActivityStatus, CoffeeKind, DailyRecord, TaskCategory, CAFFEINE_CUTOFF_HOUR, CAFFEINE_LIMIT_MG,
+    ActivityStatus, CoffeeKind, DailyRecord, TaskCategory, AWAY_BREAK_SECS, CAFFEINE_CUTOFF_HOUR,
+    CAFFEINE_LIMIT_MG,
 };
 use crate::ui::calendar_card::{CalendarCard, CalendarMode};
 use crate::ui::reminders_card::RemindersCard;
@@ -85,13 +86,25 @@ fn session_display(state: &AppState) -> SessionDisplay {
             detail: "Break started · after this, any key or mouse move starts a new session".into(),
             ratio: 0.0,
         },
-        ActivityStatus::AwayOnBreak => SessionDisplay {
-            pill: "On break",
-            tint: NSColor::systemGreenColor(),
-            value: format_mmss(state.activity.last_idle_seconds as u32),
-            detail: "Press any key or move the mouse to start a new session".into(),
-            ratio: 0.0,
-        },
+        ActivityStatus::AwayOnBreak => {
+            let away = state.activity.last_idle_seconds as u32;
+            let counted = state.activity.break_counted || away >= AWAY_BREAK_SECS;
+            SessionDisplay {
+                pill: if counted { "On break" } else { "Away" },
+                tint: if counted { NSColor::systemGreenColor() } else { NSColor::systemGrayColor() },
+                value: format_mmss(away),
+                detail: if counted {
+                    "Counted as a break · any key or mouse move starts a new session".into()
+                } else {
+                    format!(
+                        "Away from the computer · counts as a break at {}",
+                        format_mmss(AWAY_BREAK_SECS)
+                    )
+                },
+                // Fills up toward the 10 minutes that make it a break.
+                ratio: away as f64 / AWAY_BREAK_SECS as f64,
+            }
+        }
     }
 }
 

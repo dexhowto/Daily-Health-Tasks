@@ -142,7 +142,13 @@ pub struct ActivitySession {
     /// click itself doesn't start a new session (not persisted).
     #[serde(skip)]
     pub break_grace_secs: u32,
+    /// The current time away has already been counted as a break.
+    #[serde(default)]
+    pub break_counted: bool,
 }
+
+/// Time away from the computer that counts as a break.
+pub const AWAY_BREAK_SECS: u32 = 10 * 60;
 
 /// Work session as saved to disk, with the time it was saved (Unix seconds).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +170,7 @@ impl Default for ActivitySession {
             last_idle_seconds: 0.0,
             notices_sent_today: 0,
             break_grace_secs: 0,
+            break_counted: false,
         }
     }
 }
@@ -295,6 +302,11 @@ pub struct DailyRecord {
     /// Seconds with keyboard or mouse use in the last minute.
     #[serde(default)]
     pub active_seconds: u32,
+    /// First and last keyboard/mouse use that day, "HH:MM" local.
+    #[serde(default)]
+    pub first_active: Option<String>,
+    #[serde(default)]
+    pub last_active: Option<String>,
 }
 
 impl DailyRecord {
@@ -372,6 +384,8 @@ impl DailyRecord {
             coffee_log: Vec::new(),
             exercise_log: Vec::new(),
             active_seconds: 0,
+            first_active: None,
+            last_active: None,
         }
     }
 

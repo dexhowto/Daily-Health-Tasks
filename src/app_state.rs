@@ -4,7 +4,7 @@ use chrono::Local;
 use crate::audio::SoundEffects;
 use crate::models::{
     ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
-    ExerciseEntry, ExerciseKind, SavedSession, TimerState, BREAK_GRACE_SECS,
+    ExerciseEntry, ExerciseKind, SavedSession, TimerState, AWAY_BREAK_SECS, BREAK_GRACE_SECS,
 };
 use crate::storage::StorageManager;
 
@@ -181,8 +181,21 @@ impl AppState {
             self.save();
         }
 
-        // Daily time on the computer (saved once a minute).
+        // Daily time on the computer (saved once a minute), plus the first
+        // and last use of the day, taken from the time of the last input.
         if idle_seconds < 60.0 {
+            let last_input = Local::now() - chrono::Duration::milliseconds((idle_seconds * 1000.0) as i64);
+            // Input just before midnight belongs to yesterday.
+            let hhmm = if last_input.date_naive() == Local::now().date_naive() {
+                last_input.format("%H:%M").to_string()
+            } else {
+                "00:00".to_string()
+            };
+            if self.today.first_active.is_none() {
+                self.today.first_active = Some(hhmm.clone());
+                self.save();
+            }
+            self.today.last_active = Some(hhmm);
             self.today.active_seconds += 1;
             if self.today.active_seconds % 60 == 0 {
                 self.save();
@@ -198,13 +211,27 @@ impl AppState {
         let idle_reset_secs = (self.settings.idle_reset_minutes * 60) as f64;
         let work_limit_secs = self.settings.work_interval_minutes * 60;
 
-        // 1. If user was away longer than idle_reset_minutes, reset to AwayOnBreak
+        // 1. Away longer than idle_reset_minutes: the session stops and the
+        //    time away is shown instead (from `last_idle_seconds`).
         if idle_seconds >= idle_reset_secs {
             if self.activity.status != ActivityStatus::AwayOnBreak {
                 self.activity.status = ActivityStatus::AwayOnBreak;
                 self.activity.active_work_seconds = 0;
+                self.activity.break_counted = false;
                 self.activity.last_break_time = Some(Local::now().format("%H:%M:%S").to_string());
             }
+        }
+
+        // Away for 10+ minutes counts as one break.
+        if self.activity.status == ActivityStatus::AwayOnBreak
+            && !self.activity.break_counted
+            && idle_seconds >= AWAY_BREAK_SECS as f64
+        {
+            self.activity.break_counted = true;
+            self.today.breaks_taken += 1;
+            self.save();
+        }
+        if idle_seconds >= idle_reset_secs {
             return None;
         }
 
@@ -216,6 +243,7 @@ impl AppState {
             {
                 self.activity.status = ActivityStatus::ActiveWorking;
                 self.activity.active_work_seconds = 0;
+                self.activity.break_counted = false;
                 self.activity.session_start_time = Some(Local::now().format("%H:%M:%S").to_string());
             }
         }
@@ -229,8 +257,9 @@ impl AppState {
             // Check if limit reached!
             if self.activity.active_work_seconds >= work_limit_secs {
                 self.activity.status = ActivityStatus::NoticeDue;
+                // The notice is a reminder, not a break; breaks are counted
+                // when you actually step away (or use Take a Break).
                 self.activity.notices_sent_today += 1;
-                self.today.breaks_taken += 1;
 
                 self.save();
 
@@ -251,6 +280,7 @@ impl AppState {
         self.activity.status = ActivityStatus::AwayOnBreak;
         self.activity.active_work_seconds = 0;
         self.activity.break_grace_secs = BREAK_GRACE_SECS;
+        self.activity.break_counted = true; // counted now, not again after 10 min away
         self.activity.last_break_time = Some(Local::now().format("%H:%M:%S").to_string());
         self.today.breaks_taken += 1;
         if self.settings.sound_enabled {
@@ -294,7 +324,7 @@ impl AppState {
             ActivityStatus::AwayOnBreak => {
                 let away_mins = (self.activity.last_idle_seconds / 60.0).floor() as u32;
                 let away_secs = (self.activity.last_idle_seconds % 60.0).floor() as u32;
-                format!("🌿 Break ({:02}:{:02})", away_mins, away_secs)
+                format!("🌿 Away ({:02}:{:02})", away_mins, away_secs)
             }
             ActivityStatus::WaitingForInput => {
                 "⏱️ 00:00 (Ready)".to_string()

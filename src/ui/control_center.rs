@@ -321,7 +321,10 @@ impl ControlCenter {
             ActivityStatus::AwayOnBreak if state.activity.break_grace_secs > 0 => {
                 format!("Break · {}s", state.activity.break_grace_secs)
             }
-            ActivityStatus::AwayOnBreak => "On break".to_string(),
+            ActivityStatus::AwayOnBreak => {
+                let away = state.activity.last_idle_seconds as u32;
+                format!("Away {:02}:{:02}", away / 60, away % 60)
+            }
             ActivityStatus::WaitingForInput => "Ready".to_string(),
             ActivityStatus::NoticeDue => format!("{:02}:{:02} · break!", worked / 60, worked % 60),
             ActivityStatus::ActiveWorking => format!("{:02}:{:02}", worked / 60, worked % 60),

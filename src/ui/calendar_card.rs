@@ -62,6 +62,7 @@ pub struct CalendarCard {
     coffee_row: DetailRow,
     breaks_row: DetailRow,
     active_row: DetailRow,
+    span_row: DetailRow,
     /// First day of the month on screen, and the selected day.
     month: Cell<NaiveDate>,
     selected: Cell<NaiveDate>,
@@ -259,6 +260,7 @@ impl CalendarCard {
         let coffee_row = row("Coffee");
         let breaks_row = row("Breaks");
         let active_row = row("Active on computer");
+        let span_row = row("Computer use");
         UIComponents::add_full_width(&stack, &detail_rows);
 
         let today = Local::now().date_naive();
@@ -278,6 +280,7 @@ impl CalendarCard {
             coffee_row,
             breaks_row,
             active_row,
+            span_row,
             month: Cell::new(first_of_month(today)),
             selected: Cell::new(today),
         }
@@ -508,6 +511,11 @@ impl CalendarCard {
             format!("{} {}", day.breaks_taken, if day.breaks_taken == 1 { "break" } else { "breaks" }),
         );
         info(&self.active_row, "desktopcomputer", &NSColor::systemIndigoColor(), format_active(day.active_seconds));
+        let span = match (&day.first_active, &day.last_active) {
+            (Some(first), Some(last)) => format!("{first} – {last}"),
+            _ => "Not tracked".to_string(),
+        };
+        info(&self.span_row, "clock.fill", &NSColor::systemIndigoColor(), span);
     }
 
     fn set_icon(row: &DetailRow, symbol: &str, tint: &NSColor) {
