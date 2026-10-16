@@ -4,6 +4,7 @@ use objc2_app_kit::{NSButton, NSMenuItem, NSSegmentedControl};
 use objc2_foundation::{MainThreadMarker, NSObject};
 
 use crate::controller;
+use crate::models::CoffeeKind;
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -35,6 +36,26 @@ define_class!(
         #[unsafe(method(onMinusWater250:))]
         fn on_minus_water_250(&self, _sender: &NSObject) {
             controller::add_water(-250);
+        }
+
+        #[unsafe(method(onAddEspresso:))]
+        fn on_add_espresso(&self, _sender: &NSObject) {
+            controller::log_coffee(Some(CoffeeKind::Espresso));
+        }
+
+        #[unsafe(method(onAddCoffee:))]
+        fn on_add_coffee(&self, _sender: &NSObject) {
+            controller::log_coffee(Some(CoffeeKind::Coffee));
+        }
+
+        #[unsafe(method(onAddLatte:))]
+        fn on_add_latte(&self, _sender: &NSObject) {
+            controller::log_coffee(Some(CoffeeKind::Latte));
+        }
+
+        #[unsafe(method(onUndoCoffee:))]
+        fn on_undo_coffee(&self, _sender: &NSObject) {
+            controller::log_coffee(None);
         }
 
         #[unsafe(method(onToggleTask:))]

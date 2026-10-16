@@ -4,7 +4,8 @@ use objc2_app_kit::{NSColor, NSFont, NSStackView, NSStackViewGravity, NSTextFiel
 use objc2_foundation::{MainThreadMarker, NSString};
 
 use crate::app_state::AppState;
-use crate::models::DailyRecord;
+use crate::models::{DailyRecord, CAFFEINE_LIMIT_MG};
+use crate::ui::dashboard_view::caffeine_tint;
 use crate::ui::components::{
     create_page_header, ProgressBar, StatTile, UIComponents, WEIGHT_SEMIBOLD,
 };
@@ -12,6 +13,7 @@ use crate::ui::components::{
 struct DayRow {
     percent: Retained<NSTextField>,
     water: Retained<NSTextField>,
+    coffee: Retained<NSTextField>,
     breaks: Retained<NSTextField>,
     bar: ProgressBar,
 }
@@ -52,13 +54,15 @@ impl DayRow {
             l
         };
         let percent = metric(44.0);
-        let water = metric(72.0);
+        let water = metric(64.0);
+        let coffee = metric(56.0);
         let breaks = metric(72.0);
         row.addView_inGravity(&percent, NSStackViewGravity::Trailing);
         row.addView_inGravity(&water, NSStackViewGravity::Trailing);
+        row.addView_inGravity(&coffee, NSStackViewGravity::Trailing);
         row.addView_inGravity(&breaks, NSStackViewGravity::Trailing);
 
-        (row, Self { percent, water, breaks, bar })
+        (row, Self { percent, water, coffee, breaks, bar })
     }
 
     fn update(&self, record: &DailyRecord) {
@@ -70,6 +74,18 @@ impl DayRow {
             "{:.2} L",
             record.water_ml as f64 / 1000.0
         )));
+        let cups = record.coffee_cups();
+        self.coffee.setStringValue(&NSString::from_str(&format!(
+            "{} {}",
+            cups,
+            if cups == 1 { "cup" } else { "cups" }
+        )));
+        let coffee_color = if record.caffeine_mg() > CAFFEINE_LIMIT_MG {
+            NSColor::systemRedColor()
+        } else {
+            NSColor::secondaryLabelColor()
+        };
+        self.coffee.setTextColor(Some(&coffee_color));
         self.breaks.setStringValue(&NSString::from_str(&format!(
             "{} {}",
             record.breaks_taken,
@@ -88,6 +104,7 @@ pub struct HistoryView {
     pub container: Retained<NSStackView>,
     streak_tile: StatTile,
     water_tile: StatTile,
+    coffee_tile: StatTile,
     breaks_tile: StatTile,
     today_row: DayRow,
 }
@@ -108,14 +125,12 @@ impl HistoryView {
             StatTile::new("Streak", "flame.fill", &NSColor::systemOrangeColor(), mtm);
         let water_tile =
             StatTile::new("Hydration", "drop.fill", &NSColor::systemBlueColor(), mtm);
-        let breaks_tile = StatTile::new(
-            "Breaks",
-            "cup.and.saucer.fill",
-            &NSColor::systemGreenColor(),
-            mtm,
-        );
+        let coffee_tile =
+            StatTile::new("Coffee", "cup.and.saucer.fill", &NSColor::systemBrownColor(), mtm);
+        let breaks_tile =
+            StatTile::new("Breaks", "figure.walk", &NSColor::systemGreenColor(), mtm);
         let tiles = UIComponents::create_equal_row(
-            &[&streak_tile.view, &water_tile.view, &breaks_tile.view],
+            &[&streak_tile.view, &water_tile.view, &coffee_tile.view, &breaks_tile.view],
             14.0,
             mtm,
         );
@@ -206,7 +221,14 @@ impl HistoryView {
         }
         UIComponents::add_full_width(&container, &tips_card);
 
-        let view = Self { container, streak_tile, water_tile, breaks_tile, today_row };
+        let view = Self {
+            container,
+            streak_tile,
+            water_tile,
+            coffee_tile,
+            breaks_tile,
+            today_row,
+        };
         view.refresh(state, mtm);
         view
     }
@@ -220,7 +242,7 @@ impl HistoryView {
         let streak = state.calculate_streak();
         self.streak_tile.update(
             &format!("{} {}", streak, if streak == 1 { "day" } else { "days" }),
-            "In a row at 50%+ routines",
+            "In a row at 50%+",
             streak as f64 / 7.0,
         );
 
@@ -231,6 +253,23 @@ impl HistoryView {
             &format!("Avg {:.2} L per day", total_water as f64 / 1000.0 / days as f64),
             total_water as f64 / total_goal.max(1) as f64,
         );
+
+        let total_cups: u32 = recent.iter().map(|d| d.coffee_cups()).sum();
+        let avg_mg = recent.iter().map(|d| d.caffeine_mg()).sum::<u32>() / days as u32;
+        let over_days = recent.iter().filter(|d| d.caffeine_mg() > CAFFEINE_LIMIT_MG).count();
+        let mut coffee_detail = format!("Avg {avg_mg} mg per day");
+        if over_days > 0 {
+            coffee_detail = format!(
+                "Over {CAFFEINE_LIMIT_MG} mg on {over_days} {}",
+                if over_days == 1 { "day" } else { "days" }
+            );
+        }
+        self.coffee_tile.update(
+            &format!("{} {}", total_cups, if total_cups == 1 { "cup" } else { "cups" }),
+            &coffee_detail,
+            avg_mg as f64 / CAFFEINE_LIMIT_MG as f64,
+        );
+        self.coffee_tile.bar.set_tint(&caffeine_tint(avg_mg));
 
         let total_breaks: u32 = recent.iter().map(|d| d.breaks_taken).sum();
         let days_with_breaks = recent.iter().filter(|d| d.breaks_taken > 0).count();

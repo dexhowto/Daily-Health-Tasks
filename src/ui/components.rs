@@ -452,6 +452,12 @@ impl StatTile {
 
         let value = UIComponents::create_value_label("", 26.0, mtm);
         let detail = UIComponents::create_secondary_label("", 11.5, mtm);
+        // Let long details truncate so equal-width tiles stay equal.
+        detail.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
+        detail.setContentCompressionResistancePriority_forOrientation(
+            250.0,
+            objc2_app_kit::NSLayoutConstraintOrientation::Horizontal,
+        );
         let bar = ProgressBar::new(0.0, tint, 6.0, mtm);
 
         stack.addView_inGravity(&header, NSStackViewGravity::Top);

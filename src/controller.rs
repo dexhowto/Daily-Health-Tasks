@@ -9,7 +9,7 @@ use crate::action_handler::HealthTasksActionHandler;
 use crate::activity_tracker;
 use crate::app_state;
 use crate::menu_bar::MenuBarManager;
-use crate::models::BreakType;
+use crate::models::{BreakType, CoffeeKind};
 use crate::notifier::Notifier;
 use crate::ui::MainWindow;
 
@@ -82,6 +82,18 @@ pub fn add_water(amount_ml: i32) {
     {
         let mut state = app_state::state().lock().unwrap();
         state.add_water(amount_ml);
+    }
+    refresh_all();
+}
+
+/// Logs a drink, or undoes the last one when `kind` is None.
+pub fn log_coffee(kind: Option<CoffeeKind>) {
+    {
+        let mut state = app_state::state().lock().unwrap();
+        match kind {
+            Some(kind) => state.log_coffee(kind),
+            None => state.undo_coffee(),
+        }
     }
     refresh_all();
 }
@@ -330,4 +342,3 @@ pub fn refresh_all() {
         }
     });
 }
-

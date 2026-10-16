@@ -12,6 +12,7 @@ pub struct MenuBarManager {
     pub activity_item: Retained<NSMenuItem>,
     pub notice_item: Retained<NSMenuItem>,
     pub water_item: Retained<NSMenuItem>,
+    pub coffee_item: Retained<NSMenuItem>,
     pub progress_item: Retained<NSMenuItem>,
     pub sound_item: Retained<NSMenuItem>,
 }
@@ -113,6 +114,18 @@ impl MenuBarManager {
         unsafe { water_item.setTarget(Some(target)) };
         menu.addItem(&water_item);
 
+        // 5b. Quick Log Coffee
+        let coffee_item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                mtm.alloc(),
+                &NSString::from_str(&coffee_title(state)),
+                Some(sel!(onAddCoffee:)),
+                &NSString::from_str("c"),
+            )
+        };
+        unsafe { coffee_item.setTarget(Some(target)) };
+        menu.addItem(&coffee_item);
+
         // 6. Quick Stand & Stretch Break
         let stretch_item = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
@@ -211,6 +224,7 @@ impl MenuBarManager {
             activity_item,
             notice_item,
             water_item,
+            coffee_item,
             progress_item,
             sound_item,
         }
@@ -246,6 +260,8 @@ impl MenuBarManager {
         );
         self.water_item
             .setTitle(&NSString::from_str(&water_title));
+        self.coffee_item
+            .setTitle(&NSString::from_str(&coffee_title(state)));
 
         let progress_title = format!(
             "📋 Today: {}/{} Habits Done ({:.0}%)",
@@ -264,4 +280,13 @@ impl MenuBarManager {
         self.sound_item
             .setTitle(&NSString::from_str(sound_title));
     }
+}
+
+fn coffee_title(state: &AppState) -> String {
+    format!(
+        "☕ Quick Log Coffee [{} cups · {} / {} mg]",
+        state.today.coffee_cups(),
+        state.today.caffeine_mg(),
+        crate::models::CAFFEINE_LIMIT_MG
+    )
 }

@@ -10,7 +10,9 @@ use objc2_foundation::{MainThreadMarker, NSString};
 
 use crate::action_handler::HealthTasksActionHandler;
 use crate::app_state::AppState;
-use crate::models::{ActivityStatus, TaskCategory};
+use crate::models::{
+    ActivityStatus, CoffeeKind, DailyRecord, TaskCategory, CAFFEINE_CUTOFF_HOUR, CAFFEINE_LIMIT_MG,
+};
 use crate::ui::components::{
     create_page_header, ProgressBar, StatTile, UIComponents, WEIGHT_SEMIBOLD,
 };
@@ -80,6 +82,34 @@ fn session_display(state: &AppState) -> SessionDisplay {
     }
 }
 
+/// Bar color for caffeine intake: brown, amber near the limit, red over it.
+pub fn caffeine_tint(mg: u32) -> Retained<NSColor> {
+    if mg > CAFFEINE_LIMIT_MG {
+        NSColor::systemRedColor()
+    } else if mg * 4 >= CAFFEINE_LIMIT_MG * 3 {
+        NSColor::systemOrangeColor()
+    } else {
+        NSColor::systemBrownColor()
+    }
+}
+
+fn coffee_tip(day: &DailyRecord) -> String {
+    let mg = day.caffeine_mg();
+    let late = day
+        .last_coffee_time()
+        .and_then(|t| t.split(':').next()?.parse::<u32>().ok())
+        .is_some_and(|hour| hour >= CAFFEINE_CUTOFF_HOUR);
+    if day.coffee_log.is_empty() {
+        "No coffee yet today.".into()
+    } else if mg > CAFFEINE_LIMIT_MG {
+        format!("Over the {CAFFEINE_LIMIT_MG} mg daily guideline. Switch to water for the rest of the day.")
+    } else if late {
+        format!("Caffeine after {CAFFEINE_CUTOFF_HOUR}:00 can make it harder to sleep tonight.")
+    } else {
+        format!("{} mg left before the daily guideline.", CAFFEINE_LIMIT_MG - mg)
+    }
+}
+
 struct TaskRow {
     checkbox: Retained<NSButton>,
     title: Retained<NSTextField>,
@@ -95,7 +125,12 @@ pub struct DashboardView {
     session_bar: ProgressBar,
     habits_tile: StatTile,
     water_tile: StatTile,
+    coffee_tile: StatTile,
     streak_tile: StatTile,
+    caffeine_value: Retained<NSTextField>,
+    caffeine_detail: Retained<NSTextField>,
+    caffeine_bar: ProgressBar,
+    coffee_tip: Retained<NSTextField>,
     task_rows: Vec<TaskRow>,
 }
 
@@ -132,7 +167,7 @@ impl DashboardView {
         value_row.addView_inGravity(&session_detail, NSStackViewGravity::Leading);
         let break_btn = UIComponents::create_symbol_button(
             "Take a Break",
-            "cup.and.saucer.fill",
+            "figure.walk",
             target,
             sel!(onManualTakeBreak:),
             mtm,
@@ -148,9 +183,11 @@ impl DashboardView {
         let habits_tile =
             StatTile::new("Habits", "checkmark.circle.fill", &NSColor::systemGreenColor(), mtm);
         let water_tile = StatTile::new("Water", "drop.fill", &NSColor::systemBlueColor(), mtm);
+        let coffee_tile =
+            StatTile::new("Coffee", "cup.and.saucer.fill", &NSColor::systemBrownColor(), mtm);
         let streak_tile = StatTile::new("Streak", "flame.fill", &NSColor::systemOrangeColor(), mtm);
         let tiles = UIComponents::create_equal_row(
-            &[&habits_tile.view, &water_tile.view, &streak_tile.view],
+            &[&habits_tile.view, &water_tile.view, &coffee_tile.view, &streak_tile.view],
             14.0,
             mtm,
         );
@@ -198,6 +235,51 @@ impl DashboardView {
         button_row.addView_inGravity(&minus_btn, NSStackViewGravity::Trailing);
         UIComponents::add_full_width(&water_stack, &button_row);
         UIComponents::add_full_width(&container, &water_card);
+
+        // --- Coffee & caffeine ---
+        let (coffee_card, coffee_stack) = UIComponents::create_card_with_symbol(
+            "Coffee",
+            Some(("cup.and.saucer.fill", &NSColor::systemBrownColor())),
+            mtm,
+        );
+        let caffeine_row = UIComponents::create_h_stack(10.0, mtm);
+        caffeine_row.setAlignment(objc2_app_kit::NSLayoutAttribute::LastBaseline);
+        let caffeine_value = UIComponents::create_value_label("0 mg", 26.0, mtm);
+        let caffeine_detail = UIComponents::create_secondary_label("", 13.0, mtm);
+        caffeine_row.addView_inGravity(&caffeine_value, NSStackViewGravity::Leading);
+        caffeine_row.addView_inGravity(&caffeine_detail, NSStackViewGravity::Leading);
+        UIComponents::add_full_width(&coffee_stack, &caffeine_row);
+
+        let caffeine_bar = ProgressBar::new(0.0, &NSColor::systemBrownColor(), 8.0, mtm);
+        UIComponents::add_full_width(&coffee_stack, &caffeine_bar.track);
+        let coffee_tip = UIComponents::create_secondary_label("", 12.0, mtm);
+        coffee_stack.addView_inGravity(&coffee_tip, NSStackViewGravity::Top);
+
+        let coffee_buttons = UIComponents::create_h_stack(10.0, mtm);
+        for (kind, action) in [
+            (CoffeeKind::Espresso, sel!(onAddEspresso:)),
+            (CoffeeKind::Coffee, sel!(onAddCoffee:)),
+            (CoffeeKind::Latte, sel!(onAddLatte:)),
+        ] {
+            let btn = UIComponents::create_symbol_button(
+                &format!("{} · {} mg", kind.title(), kind.caffeine_mg()),
+                "plus",
+                target,
+                action,
+                mtm,
+            );
+            coffee_buttons.addView_inGravity(&btn, NSStackViewGravity::Leading);
+        }
+        let undo_coffee = UIComponents::create_symbol_button(
+            "Undo",
+            "arrow.uturn.backward",
+            target,
+            sel!(onUndoCoffee:),
+            mtm,
+        );
+        coffee_buttons.addView_inGravity(&undo_coffee, NSStackViewGravity::Trailing);
+        UIComponents::add_full_width(&coffee_stack, &coffee_buttons);
+        UIComponents::add_full_width(&container, &coffee_card);
 
         // --- Daily routines checklist ---
         let (tasks_card, tasks_stack) = UIComponents::create_card_with_symbol(
@@ -261,7 +343,12 @@ impl DashboardView {
             session_bar,
             habits_tile,
             water_tile,
+            coffee_tile,
             streak_tile,
+            caffeine_value,
+            caffeine_detail,
+            caffeine_bar,
+            coffee_tip,
             task_rows,
         };
         view.refresh(state);
@@ -290,10 +377,30 @@ impl DashboardView {
             &format!("of {:.1} L daily goal", today.water_goal_ml as f64 / 1000.0),
             water_ratio,
         );
+        let mg = today.caffeine_mg();
+        let cups = today.coffee_cups();
+        let cups_text = format!("{} {}", cups, if cups == 1 { "cup" } else { "cups" });
+        let caffeine_ratio = mg as f64 / CAFFEINE_LIMIT_MG as f64;
+        let tint = caffeine_tint(mg);
+        self.coffee_tile.update(&cups_text, &format!("{mg} mg caffeine"), caffeine_ratio);
+        self.coffee_tile.bar.set_tint(&tint);
+
+        self.caffeine_value
+            .setStringValue(&NSString::from_str(&format!("{mg} mg")));
+        let mut detail = format!("of {CAFFEINE_LIMIT_MG} mg caffeine · {cups_text}");
+        if let Some(last) = today.last_coffee_time() {
+            detail.push_str(&format!(" · last at {last}"));
+        }
+        self.caffeine_detail.setStringValue(&NSString::from_str(&detail));
+        self.caffeine_bar.set_tint(&tint);
+        self.caffeine_bar.set_ratio(caffeine_ratio);
+        self.coffee_tip
+            .setStringValue(&NSString::from_str(&coffee_tip(today)));
+
         let streak = state.calculate_streak();
         self.streak_tile.update(
             &format!("{} {}", streak, if streak == 1 { "day" } else { "days" }),
-            "Days with half or more routines done",
+            "Days at 50%+ routines",
             streak as f64 / 7.0,
         );
 

@@ -269,7 +269,6 @@ impl MainWindow {
         self.history_view.refresh(state, mtm);
     }
 
-
     pub fn show(&self) {
         self.window.makeKeyAndOrderFront(None);
     }

@@ -2,7 +2,10 @@ use std::sync::{Mutex, OnceLock};
 use chrono::Local;
 
 use crate::audio::SoundEffects;
-use crate::models::{ActivitySession, ActivityStatus, AppSettings, BreakType, DailyRecord, TimerState};
+use crate::models::{
+    ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
+    TimerState,
+};
 use crate::storage::StorageManager;
 
 pub struct AppState {
@@ -52,6 +55,23 @@ impl AppState {
         }
 
         self.save();
+    }
+
+    pub fn log_coffee(&mut self, kind: CoffeeKind) {
+        self.today.coffee_log.push(CoffeeEntry {
+            time: Local::now().format("%H:%M").to_string(),
+            kind,
+        });
+        if self.settings.sound_enabled {
+            SoundEffects::play_named("Pop");
+        }
+        self.save();
+    }
+
+    pub fn undo_coffee(&mut self) {
+        if self.today.coffee_log.pop().is_some() {
+            self.save();
+        }
     }
 
     pub fn toggle_task(&mut self, task_id: &str) {

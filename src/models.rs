@@ -204,6 +204,44 @@ impl TimerState {
     }
 }
 
+/// FDA guideline for healthy adults: up to 400 mg of caffeine a day.
+pub const CAFFEINE_LIMIT_MG: u32 = 400;
+/// Caffeine after this hour (local time) tends to affect sleep.
+pub const CAFFEINE_CUTOFF_HOUR: u32 = 14;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CoffeeKind {
+    Espresso,
+    Coffee,
+    Latte,
+}
+
+impl CoffeeKind {
+    pub fn title(&self) -> &'static str {
+        match self {
+            CoffeeKind::Espresso => "Espresso",
+            CoffeeKind::Coffee => "Coffee",
+            CoffeeKind::Latte => "Latte",
+        }
+    }
+
+    /// Typical caffeine content in mg (single espresso shot, 240 ml brewed
+    /// coffee, latte/cappuccino with a double shot).
+    pub fn caffeine_mg(&self) -> u32 {
+        match self {
+            CoffeeKind::Espresso => 63,
+            CoffeeKind::Coffee => 95,
+            CoffeeKind::Latte => 126,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoffeeEntry {
+    pub time: String, // HH:MM local
+    pub kind: CoffeeKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyRecord {
     pub date: String, // YYYY-MM-DD
@@ -211,6 +249,8 @@ pub struct DailyRecord {
     pub water_goal_ml: u32,
     pub tasks: Vec<HealthTask>,
     pub breaks_taken: u32,
+    #[serde(default)]
+    pub coffee_log: Vec<CoffeeEntry>,
 }
 
 impl DailyRecord {
@@ -285,7 +325,20 @@ impl DailyRecord {
             water_goal_ml: 2000,
             tasks: default_tasks,
             breaks_taken: 0,
+            coffee_log: Vec::new(),
         }
+    }
+
+    pub fn coffee_cups(&self) -> u32 {
+        self.coffee_log.len() as u32
+    }
+
+    pub fn caffeine_mg(&self) -> u32 {
+        self.coffee_log.iter().map(|c| c.kind.caffeine_mg()).sum()
+    }
+
+    pub fn last_coffee_time(&self) -> Option<&str> {
+        self.coffee_log.last().map(|c| c.time.as_str())
     }
 
     pub fn completion_ratio(&self) -> f64 {
