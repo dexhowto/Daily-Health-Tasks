@@ -4,6 +4,7 @@ pub mod control_center;
 pub mod dashboard_view;
 pub mod guides_view;
 pub mod history_view;
+pub mod notice_panel;
 pub mod reminders_card;
 pub mod settings_view;
 pub mod statistics_view;
@@ -13,8 +14,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::{
-    NSBackingStoreType, NSBox, NSButton, NSCellImagePosition, NSColor, NSFont, NSScrollView,
-    NSStackViewGravity, NSTextAlignment, NSView, NSVisualEffectBlendingMode,
+    NSBackingStoreType, NSBox, NSButton, NSColor, NSFont, NSScrollView,
+    NSStackViewGravity, NSView, NSVisualEffectBlendingMode,
     NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowStyleMask,
     NSWindowTitleVisibility,
 };
@@ -50,7 +51,8 @@ pub const GUIDES_TAB: usize = 5;
 struct NavItem {
     tab: usize,
     highlight: Retained<NSBox>,
-    button: Retained<NSButton>,
+    icon: Retained<objc2_app_kit::NSImageView>,
+    label: Retained<objc2_app_kit::NSTextField>,
 }
 
 pub struct MainWindow {
@@ -136,38 +138,46 @@ impl MainWindow {
 
         let mut nav_items = Vec::new();
         for (tab, title, symbol) in NAV_ITEMS {
-            let highlight = UIComponents::create_rounded_box(7.0, mtm);
+            let highlight = UIComponents::create_rounded_box(8.0, mtm);
             highlight.setBorderWidth(0.0);
             highlight.setFillColor(&NSColor::clearColor());
 
+            // Icon in a fixed-width column, so every label starts at the same x.
+            let row = UIComponents::create_h_stack(10.0, mtm);
+            let icon = UIComponents::create_symbol_view(symbol, 14.0, &NSColor::secondaryLabelColor(), mtm);
+            icon.setTranslatesAutoresizingMaskIntoConstraints(false);
+            UIComponents::pin_size(&icon, 20.0, 20.0);
+            row.addView_inGravity(&icon, NSStackViewGravity::Leading);
+            let label = UIComponents::create_weighted_label(title, 13.0, WEIGHT_MEDIUM, mtm);
+            row.addView_inGravity(&label, NSStackViewGravity::Leading);
+            highlight.addSubview(&row);
+
+            // Invisible button over the whole row takes the click.
             let button = unsafe {
                 NSButton::buttonWithTitle_target_action(
-                    &NSString::from_str(title),
+                    &NSString::from_str(""),
                     Some(target),
                     Some(sel!(onTabSwitch:)),
                     mtm,
                 )
             };
             button.setBordered(false);
+            button.setTransparent(true);
             button.setTag(tab as isize);
-            button.setAlignment(NSTextAlignment::Left);
-            button.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, WEIGHT_MEDIUM)));
-            if let Some(img) = UIComponents::symbol(symbol, 14.0, WEIGHT_MEDIUM) {
-                button.setImage(Some(&img));
-                button.setImagePosition(NSCellImagePosition::ImageLeading);
-            }
             button.setTranslatesAutoresizingMaskIntoConstraints(false);
             highlight.addSubview(&button);
             UIComponents::activate(&[
-                highlight.heightAnchor().constraintEqualToConstant(32.0),
-                button.leadingAnchor().constraintEqualToAnchor_constant(&highlight.leadingAnchor(), 10.0),
-                button.trailingAnchor().constraintEqualToAnchor_constant(&highlight.trailingAnchor(), -10.0),
+                highlight.heightAnchor().constraintEqualToConstant(34.0),
+                row.leadingAnchor().constraintEqualToAnchor_constant(&highlight.leadingAnchor(), 10.0),
+                row.centerYAnchor().constraintEqualToAnchor(&highlight.centerYAnchor()),
+                button.leadingAnchor().constraintEqualToAnchor(&highlight.leadingAnchor()),
+                button.trailingAnchor().constraintEqualToAnchor(&highlight.trailingAnchor()),
                 button.topAnchor().constraintEqualToAnchor(&highlight.topAnchor()),
                 button.bottomAnchor().constraintEqualToAnchor(&highlight.bottomAnchor()),
             ]);
 
             UIComponents::add_full_width(&sidebar_stack, &highlight);
-            nav_items.push(NavItem { tab, highlight, button });
+            nav_items.push(NavItem { tab, highlight, icon, label });
         }
 
         // --- Content (scrollable) ---
@@ -272,16 +282,23 @@ impl MainWindow {
             let selected = item.tab == index;
             if selected {
                 item.highlight
-                    .setFillColor(&NSColor::controlAccentColor().colorWithAlphaComponent(0.16));
-                item.button.setContentTintColor(Some(&NSColor::controlAccentColor()));
+                    .setFillColor(&NSColor::controlAccentColor().colorWithAlphaComponent(0.18));
+                item.icon.setContentTintColor(Some(&NSColor::controlAccentColor()));
+                item.label.setTextColor(Some(&NSColor::labelColor()));
+                item.label.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, WEIGHT_SEMIBOLD)));
             } else {
                 item.highlight.setFillColor(&NSColor::clearColor());
-                item.button.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+                item.icon.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+                item.label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+                item.label.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, WEIGHT_MEDIUM)));
             }
         }
-        if let Some(doc) = self.scroll_view.documentView() {
-            doc.scrollPoint(NSPoint::new(0.0, 0.0));
-        }
+        // Back to the top, below the title bar inset, so every page starts
+        // at the same height.
+        let clip = self.scroll_view.contentView();
+        let top = -self.scroll_view.contentInsets().top;
+        clip.scrollToPoint(NSPoint::new(0.0, top));
+        self.scroll_view.reflectScrolledClipView(&clip);
     }
 
     pub fn refresh(&self, state: &AppState, mtm: MainThreadMarker) {

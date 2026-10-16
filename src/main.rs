@@ -11,6 +11,8 @@ mod models;
 mod notifier;
 mod reminders;
 mod screen_recording;
+#[cfg(debug_assertions)]
+mod snapshots;
 mod storage;
 mod ui;
 
@@ -32,9 +34,17 @@ fn main() {
         unsafe { app.setApplicationIconImage(Some(&icon)) };
     }
 
+    // Debug snapshots in light mode (see snapshots.rs).
+    #[cfg(debug_assertions)]
+    if std::env::var_os("HT_LIGHT").is_some() {
+        let light = objc2_app_kit::NSAppearance::appearanceNamed(unsafe { objc2_app_kit::NSAppearanceNameAqua });
+        app.setAppearance(light.as_deref());
+    }
+
     // Initialize UI Controller (MainWindow + MenuBar status item + Timer)
     controller::init_controller(mtm);
     reminders::start();
+    notifier::Notifier::setup();
 
     // App + window delegate. The dashboard is shown from
     // applicationDidFinishLaunching, unless launched at login.
@@ -45,6 +55,11 @@ fn main() {
     // Setup standard macOS Application menu bar (Quit, Window, etc.).
     // After the controller, so menu items can target its action handler.
     setup_main_menu(app.as_ref(), mtm);
+
+    #[cfg(debug_assertions)]
+    if let Ok(dir) = std::env::var("HT_SNAPSHOTS") {
+        snapshots::schedule(dir, mtm);
+    }
 
     println!("{APP_NAME} started successfully! Running native macOS event loop...");
     app.run();

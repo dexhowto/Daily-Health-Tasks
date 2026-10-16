@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
-use objc2_app_kit::NSApplication;
+use objc2_app_kit::{NSApplication, NSColor};
 use objc2_foundation::{MainThreadMarker, NSString, NSTimer};
 
 use crate::action_handler::HealthTasksActionHandler;
@@ -11,9 +11,11 @@ use crate::reminders;
 use crate::screen_recording;
 use crate::app_state;
 use crate::menu_bar::MenuBarManager;
-use crate::models::{BreakType, CoffeeKind, ExerciseKind};
+use crate::models::{ActivityStatus, BreakType, CoffeeKind, ExerciseKind};
 use crate::notifier::Notifier;
+use crate::ui::calendar_card::format_active;
 use crate::ui::control_center::ControlCenter;
+use crate::ui::notice_panel::{NoticeContent, NoticePanel};
 use crate::ui::MainWindow;
 
 #[allow(dead_code)]
@@ -22,6 +24,10 @@ pub struct AppController {
     pub main_window: MainWindow,
     pub menu_bar: MenuBarManager,
     pub control_center: ControlCenter,
+    /// "Time for a break" card shown at the work limit.
+    pub break_notice: NoticePanel,
+    /// "You're on a break" question shown on input during a manual break.
+    pub break_question: NoticePanel,
     pub timer: Retained<NSTimer>,
     pub mtm: MainThreadMarker,
 }
@@ -59,11 +65,16 @@ pub fn init_controller(mtm: MainThreadMarker) {
 
     drop(state);
 
+    let break_notice = NoticePanel::new(&handler, mtm);
+    let break_question = NoticePanel::new(&handler, mtm);
+
     let controller = AppController {
         handler,
         main_window,
         menu_bar,
         control_center,
+        break_notice,
+        break_question,
         timer,
         mtm,
     };
@@ -311,17 +322,15 @@ pub fn save_settings_from_ui() {
 pub fn test_notice() {
     let mut title = String::new();
     let mut message = String::new();
-    let mut mtm_opt = None;
 
     CONTROLLER.with(|c| {
         if let Some(ctrl) = c.borrow().as_ref() {
             title = ctrl.main_window.settings_view.title_field.stringValue().to_string();
             message = ctrl.main_window.settings_view.message_field.stringValue().to_string();
-            mtm_opt = Some(ctrl.mtm);
         }
     });
 
-    let (sound, show_banner, show_alert) = {
+    let notice = {
         let state = app_state::state().lock().unwrap();
         if title.is_empty() {
             title = state.settings.notice_title.clone();
@@ -330,15 +339,46 @@ pub fn test_notice() {
             message = state.settings.notice_message.clone();
         }
         (
+            title,
+            message,
             state.settings.sound_name.clone(),
             state.settings.show_banner_notification,
             state.settings.show_alert_dialog,
         )
     };
+    deliver_notice(notice);
+}
 
-    if let Some(mtm) = mtm_opt {
-        Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm);
-    }
+/// "Take a Break" on the break notice.
+pub fn notice_take_break() {
+    hide_notice_panels();
+    manual_take_break();
+}
+
+pub fn notice_dismiss() {
+    hide_notice_panels();
+}
+
+/// Answer to the "You're on a break" question.
+pub fn answer_break_question(back_to_work: bool) {
+    with_controller(|ctrl| ctrl.break_question.hide());
+    app_state::state().lock().unwrap().resolve_break_input(back_to_work);
+    refresh_all();
+}
+
+fn hide_notice_panels() {
+    with_controller(|ctrl| {
+        ctrl.break_notice.hide();
+        ctrl.break_question.hide();
+    });
+}
+
+fn with_controller(f: impl FnOnce(&AppController)) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            f(ctrl);
+        }
+    });
 }
 
 pub fn connect_reminders() {
@@ -509,10 +549,10 @@ pub fn on_timer_tick() {
             "Screen recording {}",
             if recording { "started: holding break notices" } else { "ended" }
         );
-        CONTROLLER.with(|c| {
-            if let Some(ctrl) = c.borrow().as_ref() {
-                ctrl.control_center.on_recording_changed(recording);
-            }
+        with_controller(|ctrl| {
+            ctrl.control_center.on_recording_changed(recording);
+            ctrl.break_notice.set_suspended(recording);
+            ctrl.break_question.set_suspended(recording);
         });
     }
 
@@ -537,11 +577,28 @@ pub fn on_timer_tick() {
         std::mem::take(&mut state.activity.break_input_pending)
     };
     if break_input && !recording {
-        let mtm = CONTROLLER.with(|c| c.borrow().as_ref().map(|ctrl| ctrl.mtm));
-        if let Some(mtm) = mtm {
-            let back_to_work = Notifier::ask_end_break(mtm);
-            app_state::state().lock().unwrap().resolve_break_input(back_to_work);
-        }
+        with_controller(|ctrl| {
+            if !ctrl.break_question.is_shown() {
+                ctrl.break_question.show(&break_question_content());
+            }
+        });
+    }
+
+    // Close a notice that no longer applies: the break notice once a break
+    // starts (any way), the question once the manual break is over.
+    {
+        let state = app_state::state().lock().unwrap();
+        let on_break = state.activity.status == ActivityStatus::AwayOnBreak;
+        let manual_break = on_break && state.activity.manual_break;
+        drop(state);
+        with_controller(|ctrl| {
+            if on_break && ctrl.break_notice.is_shown() {
+                ctrl.break_notice.hide();
+            }
+            if !manual_break && ctrl.break_question.is_shown() {
+                ctrl.break_question.hide();
+            }
+        });
     }
 
     // 2. Check manual interval countdown timer
@@ -562,17 +619,44 @@ pub fn on_timer_tick() {
 }
 
 fn deliver_notice((title, message, sound, show_banner, show_alert): Notice) {
-    let mut mtm_opt = None;
-    CONTROLLER.with(|c| {
-        if let Some(ctrl) = c.borrow().as_ref() {
-            mtm_opt = Some(ctrl.mtm);
-        }
-    });
+    Notifier::send_notice(&title, &message, &sound, show_banner);
+    if !show_alert {
+        return;
+    }
+    let (worked, notices) = {
+        let state = app_state::state().lock().unwrap();
+        (state.activity.active_work_seconds, state.activity.notices_sent_today)
+    };
+    let mut facts = Vec::new();
+    if worked >= 60 {
+        facts.push(("keyboard", format!("{} without a break", format_active(worked))));
+    }
+    if notices > 1 {
+        facts.push(("bell", format!("Reminder {notices} today")));
+    }
+    let content = NoticeContent {
+        symbol: "figure.stand",
+        tint: NSColor::systemGreenColor(),
+        caption: "Break time",
+        title: &title,
+        message: &message,
+        facts,
+        secondary: ("Not Now", sel!(onNoticeDismiss:)),
+        primary: ("Take a Break", "pause.circle.fill", sel!(onNoticeTakeBreak:)),
+    };
+    with_controller(|ctrl| ctrl.break_notice.show(&content));
+}
 
-    if let Some(mtm) = mtm_opt {
-        if Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm) {
-            manual_take_break();
-        }
+fn break_question_content() -> NoticeContent<'static> {
+    NoticeContent {
+        symbol: "leaf.fill",
+        tint: NSColor::systemTealColor(),
+        caption: "On a break",
+        title: "You're on a break",
+        message: "You used the keyboard or mouse. End the break and go back to work, or keep resting?",
+        facts: Vec::new(),
+        secondary: ("Keep Resting", sel!(onBreakKeepResting:)),
+        primary: ("Back to Work", "arrow.uturn.backward.circle.fill", sel!(onBreakBackToWork:)),
     }
 }
 
@@ -584,5 +668,38 @@ pub fn refresh_all() {
             ctrl.control_center.refresh(&state);
             ctrl.menu_bar.refresh(&state, ctrl.mtm);
         }
+    });
+}
+
+/// Debug builds: renders each page, the control center and the break notice.
+#[cfg(debug_assertions)]
+pub fn render_snapshots(dir: &str) {
+    use crate::snapshots::write_png;
+    let pages = [(0, "today"), (1, "timer"), (2, "settings"), (3, "insights"), (4, "statistics"), (crate::ui::GUIDES_TAB, "guides")];
+    for (tab, name) in pages {
+        with_controller(|ctrl| ctrl.main_window.switch_tab(tab));
+        refresh_all();
+        with_controller(|ctrl| {
+            if let Some(view) = ctrl.main_window.window.contentView() {
+                write_png(&view, &format!("{dir}/{name}.png"));
+            }
+        });
+    }
+    // The control center expanded, whatever its saved state (the snapshot
+    // run uses its own copy of the settings).
+    if app_state::state().lock().unwrap().settings.control_center_collapsed {
+        toggle_control_center_collapsed();
+    }
+    with_controller(|ctrl| {
+        if let Some(view) = ctrl.control_center.panel.contentView() {
+            write_png(&view, &format!("{dir}/control_center.png"));
+        }
+    });
+    test_notice();
+    with_controller(|ctrl| {
+        if let Some(view) = ctrl.break_notice.content_view() {
+            write_png(&view, &format!("{dir}/notice.png"));
+        }
+        ctrl.break_notice.hide();
     });
 }

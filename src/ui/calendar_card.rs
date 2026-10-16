@@ -154,9 +154,9 @@ impl CalendarCard {
         stack.setSpacing(10.0);
 
         // Header: month name and navigation.
-        let header = UIComponents::create_h_stack(8.0, mtm);
+        let header = UIComponents::create_h_stack(10.0, mtm);
         header.addView_inGravity(
-            &UIComponents::create_symbol_view("calendar", 14.0, &NSColor::systemRedColor(), mtm),
+            &UIComponents::create_icon_badge("calendar", &NSColor::systemRedColor(), 28.0, mtm),
             NSStackViewGravity::Leading,
         );
         let month_label = UIComponents::create_weighted_label("", 15.0, WEIGHT_SEMIBOLD, mtm);
@@ -435,7 +435,7 @@ impl CalendarCard {
             let fill = if date == selected {
                 NSColor::controlAccentColor().colorWithAlphaComponent(0.22)
             } else if in_month {
-                NSColor::labelColor().colorWithAlphaComponent(0.04)
+                UIComponents::label_wash(0.04)
             } else {
                 NSColor::clearColor()
             };

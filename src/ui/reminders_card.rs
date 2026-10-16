@@ -31,9 +31,9 @@ impl RemindersCard {
         stack.setSpacing(12.0);
 
         // Header: icon + title, progress pill and "Open Reminders" on the right.
-        let header = UIComponents::create_h_stack(8.0, mtm);
+        let header = UIComponents::create_h_stack(10.0, mtm);
         header.addView_inGravity(
-            &UIComponents::create_symbol_view("checklist.checked", 14.0, &NSColor::systemOrangeColor(), mtm),
+            &UIComponents::create_icon_badge("checklist.checked", &NSColor::systemOrangeColor(), 28.0, mtm),
             NSStackViewGravity::Leading,
         );
         header.addView_inGravity(

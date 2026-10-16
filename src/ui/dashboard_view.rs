@@ -152,6 +152,7 @@ pub struct DashboardView {
     pub container: Retained<NSStackView>,
     pub reminders: RemindersCard,
     pub week: CalendarCard,
+    session_card: Retained<NSBox>,
     session_pill: Retained<NSBox>,
     session_pill_label: Retained<NSTextField>,
     session_value: Retained<NSTextField>,
@@ -195,7 +196,7 @@ impl DashboardView {
 
         let value_row = UIComponents::create_h_stack(12.0, mtm);
         value_row.setAlignment(objc2_app_kit::NSLayoutAttribute::LastBaseline);
-        let session_value = UIComponents::create_value_label("00:00", 40.0, mtm);
+        let session_value = UIComponents::create_value_label("00:00", 44.0, mtm);
         let session_detail = UIComponents::create_secondary_label("", 13.0, mtm);
         value_row.addView_inGravity(&session_value, NSStackViewGravity::Leading);
         value_row.addView_inGravity(&session_detail, NSStackViewGravity::Leading);
@@ -398,6 +399,7 @@ impl DashboardView {
             container,
             reminders,
             week,
+            session_card,
             session_pill,
             session_pill_label,
             session_value,
@@ -423,6 +425,9 @@ impl DashboardView {
         self.session_pill_label.setStringValue(&NSString::from_str(session.pill));
         self.session_pill_label.setTextColor(Some(&session.tint));
         self.session_pill.setFillColor(&session.tint.colorWithAlphaComponent(0.15));
+        // The session card takes a faint wash of the status color.
+        self.session_card.setFillColor(&session.tint.colorWithAlphaComponent(0.07));
+        self.session_card.setBorderColor(&session.tint.colorWithAlphaComponent(0.28));
         self.session_value.setStringValue(&NSString::from_str(&session.value));
         self.session_detail.setStringValue(&NSString::from_str(&session.detail));
         self.session_bar.set_tint(&session.tint);

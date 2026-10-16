@@ -35,6 +35,7 @@ fn segment_for(break_type: &BreakType) -> isize {
 pub struct TimerView {
     pub container: Retained<NSStackView>,
     pub mode_selector: Retained<NSSegmentedControl>,
+    timer_card: Retained<objc2_app_kit::NSBox>,
     mode_icon: Retained<NSImageView>,
     mode_title: Retained<NSTextField>,
     pub countdown_label: Retained<NSTextField>,
@@ -170,6 +171,7 @@ impl TimerView {
         let view = Self {
             container,
             mode_selector,
+            timer_card,
             mode_icon,
             mode_title,
             countdown_label,
@@ -189,6 +191,9 @@ impl TimerView {
             self.mode_icon.setImage(Some(&img));
         }
         self.mode_icon.setContentTintColor(Some(&tint));
+        // The timer card takes a faint wash of the break type's color.
+        self.timer_card.setFillColor(&tint.colorWithAlphaComponent(0.06));
+        self.timer_card.setBorderColor(&tint.colorWithAlphaComponent(0.25));
         self.mode_title
             .setStringValue(&NSString::from_str(timer.break_type.title()));
         self.countdown_label

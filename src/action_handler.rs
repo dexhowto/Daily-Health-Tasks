@@ -221,6 +221,26 @@ define_class!(
             controller::toggle_alert_setting();
         }
 
+        #[unsafe(method(onNoticeTakeBreak:))]
+        fn on_notice_take_break(&self, _sender: &NSObject) {
+            controller::notice_take_break();
+        }
+
+        #[unsafe(method(onNoticeDismiss:))]
+        fn on_notice_dismiss(&self, _sender: &NSObject) {
+            controller::notice_dismiss();
+        }
+
+        #[unsafe(method(onBreakBackToWork:))]
+        fn on_break_back_to_work(&self, _sender: &NSObject) {
+            controller::answer_break_question(true);
+        }
+
+        #[unsafe(method(onBreakKeepResting:))]
+        fn on_break_keep_resting(&self, _sender: &NSObject) {
+            controller::answer_break_question(false);
+        }
+
         #[unsafe(method(onTestNotice:))]
         fn on_test_notice(&self, _sender: &NSObject) {
             controller::test_notice();

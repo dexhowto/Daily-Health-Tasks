@@ -3,12 +3,12 @@ use std::cell::RefCell;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2_app_kit::{
-    NSBezelStyle, NSBox, NSBoxType, NSButton, NSColor, NSControlSize, NSControlStateValueOff,
+    NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSBezelStyle, NSBox, NSBoxType, NSButton, NSColor, NSControlSize, NSControlStateValueOff,
     NSControlStateValueOn, NSFont, NSImage, NSImageSymbolConfiguration, NSImageView,
     NSLayoutConstraint, NSStackView, NSStackViewGravity, NSSwitch, NSTextAlignment, NSTextField,
     NSTitlePosition, NSUserInterfaceLayoutOrientation, NSView,
 };
-use objc2_foundation::{MainThreadMarker, NSEdgeInsets, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{MainThreadMarker, NSArray, NSEdgeInsets, NSPoint, NSRect, NSSize, NSString};
 
 /// Font weights (NSFontWeight raw values).
 pub const WEIGHT_REGULAR: f64 = 0.0;
@@ -18,7 +18,7 @@ pub const WEIGHT_BOLD: f64 = 0.4;
 
 /// Shared spacing scale.
 pub const CARD_PADDING: f64 = 20.0;
-pub const CARD_RADIUS: f64 = 12.0;
+pub const CARD_RADIUS: f64 = 14.0;
 
 pub struct UIComponents;
 
@@ -237,9 +237,7 @@ impl UIComponents {
         mtm: MainThreadMarker,
     ) -> (Retained<NSBox>, Retained<NSStackView>) {
         let box_view = Self::create_rounded_box(CARD_RADIUS, mtm);
-        box_view.setBorderWidth(1.0);
-        box_view.setBorderColor(&NSColor::separatorColor());
-        box_view.setFillColor(&NSColor::controlBackgroundColor());
+        Self::style_surface(&box_view);
 
         let stack = Self::create_v_stack(14.0, mtm);
         stack.setEdgeInsets(NSEdgeInsets {
@@ -250,9 +248,9 @@ impl UIComponents {
         });
 
         if !title.is_empty() {
-            let header = Self::create_h_stack(8.0, mtm);
+            let header = Self::create_h_stack(10.0, mtm);
             if let Some((name, tint)) = symbol {
-                let icon = Self::create_symbol_view(name, 14.0, tint, mtm);
+                let icon = Self::create_icon_badge(name, tint, 28.0, mtm);
                 header.addView_inGravity(&icon, NSStackViewGravity::Leading);
             }
             let label = Self::create_weighted_label(title, 15.0, WEIGHT_SEMIBOLD, mtm);
@@ -262,6 +260,29 @@ impl UIComponents {
 
         Self::set_box_content(&box_view, &stack);
         (box_view, stack)
+    }
+
+    /// Card surface: a shade off the page, with a faint edge.
+    pub fn style_surface(box_view: &NSBox) {
+        box_view.setFillColor(&Self::label_wash(0.04));
+        box_view.setBorderColor(&Self::label_wash(0.08));
+        box_view.setBorderWidth(1.0);
+    }
+
+    /// Text color at `alpha` (black in light mode, white in dark mode) that
+    /// follows appearance changes while the app runs. `labelColor()` with an
+    /// alpha keeps the appearance it was made in.
+    pub fn label_wash(alpha: f64) -> Retained<NSColor> {
+        let light = NSColor::colorWithWhite_alpha(0.0, alpha);
+        let dark = NSColor::colorWithWhite_alpha(1.0, alpha);
+        let provider = block2::RcBlock::new(move |appearance: std::ptr::NonNull<NSAppearance>| {
+            let names = NSArray::from_slice(&[unsafe { NSAppearanceNameAqua }, unsafe { NSAppearanceNameDarkAqua }]);
+            let best = unsafe { appearance.as_ref() }.bestMatchFromAppearancesWithNames(&names);
+            let is_dark = best.is_some_and(|name| &*name == unsafe { NSAppearanceNameDarkAqua });
+            // The block owns both colors, so the pointers stay valid.
+            std::ptr::NonNull::from(if is_dark { &*dark } else { &*light })
+        });
+        unsafe { NSColor::colorWithName_dynamicProvider(None, &provider) }
     }
 
     pub fn create_v_stack(spacing: f64, mtm: MainThreadMarker) -> Retained<NSStackView> {
@@ -445,12 +466,12 @@ impl StatTile {
         stack.setSpacing(6.0);
         stack.setEdgeInsets(NSEdgeInsets { top: 16.0, left: 16.0, bottom: 16.0, right: 16.0 });
 
-        let header = UIComponents::create_h_stack(6.0, mtm);
-        let icon = UIComponents::create_symbol_view(symbol, 11.0, tint, mtm);
+        let header = UIComponents::create_h_stack(8.0, mtm);
+        let icon = UIComponents::create_icon_badge(symbol, tint, 22.0, mtm);
         header.addView_inGravity(&icon, NSStackViewGravity::Leading);
         header.addView_inGravity(&UIComponents::create_caption(caption, mtm), NSStackViewGravity::Leading);
 
-        let value = UIComponents::create_value_label("", 26.0, mtm);
+        let value = UIComponents::create_value_label("", 28.0, mtm);
         let detail = UIComponents::create_secondary_label("", 11.5, mtm);
         // Let long details truncate so equal-width tiles stay equal.
         detail.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
@@ -461,6 +482,7 @@ impl StatTile {
         let bar = ProgressBar::new(0.0, tint, 6.0, mtm);
 
         stack.addView_inGravity(&header, NSStackViewGravity::Top);
+        stack.setCustomSpacing_afterView(10.0, &header);
         stack.addView_inGravity(&value, NSStackViewGravity::Top);
         stack.addView_inGravity(&detail, NSStackViewGravity::Top);
         stack.setCustomSpacing_afterView(10.0, &detail);
@@ -484,7 +506,7 @@ pub fn create_page_header(
 ) -> Retained<NSStackView> {
     let stack = UIComponents::create_v_stack(4.0, mtm);
     stack.addView_inGravity(
-        &UIComponents::create_weighted_label(title, 26.0, WEIGHT_BOLD, mtm),
+        &UIComponents::create_weighted_label(title, 28.0, WEIGHT_BOLD, mtm),
         NSStackViewGravity::Top,
     );
     stack.addView_inGravity(

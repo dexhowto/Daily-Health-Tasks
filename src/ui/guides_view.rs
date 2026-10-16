@@ -4,7 +4,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{sel, Message};
 use objc2_app_kit::{
-    NSBox, NSButton, NSCellImagePosition, NSColor, NSFont, NSLayoutConstraintOrientation, NSStackView,
+    NSBox, NSButton, NSColor, NSFont, NSLayoutConstraintOrientation, NSStackView,
     NSStackViewGravity, NSTextAlignment, NSTextField, NSView,
 };
 use objc2_foundation::{MainThreadMarker, NSString};
@@ -40,7 +40,8 @@ fn action_selector(action: GuideAction) -> Sel {
 
 struct Chip {
     view: Retained<NSBox>,
-    button: Retained<NSButton>,
+    icon: Retained<objc2_app_kit::NSImageView>,
+    label: Retained<NSTextField>,
 }
 
 /// Guides page: a picker of all exercises and routines, and the selected
@@ -110,30 +111,43 @@ impl GuidesView {
         view
     }
 
+    /// Picker chip: tinted icon and plain label, left-aligned, with an
+    /// invisible button over it for the click.
     fn build_chip(idx: usize, guide: &Guide, handler: &HealthTasksActionHandler, mtm: MainThreadMarker) -> Chip {
         let target: &AnyObject = handler;
-        let view = UIComponents::create_rounded_box(8.0, mtm);
+        let view = UIComponents::create_rounded_box(9.0, mtm);
         view.setBorderWidth(0.0);
-        view.heightAnchor().constraintEqualToConstant(34.0).setActive(true);
+        view.heightAnchor().constraintEqualToConstant(36.0).setActive(true);
+
+        let row = UIComponents::create_h_stack(9.0, mtm);
+        let icon = UIComponents::create_symbol_view(guide.symbol, 13.0, &guide_color(guide.color), mtm);
+        icon.setTranslatesAutoresizingMaskIntoConstraints(false);
+        UIComponents::pin_size(&icon, 20.0, 20.0);
+        row.addView_inGravity(&icon, NSStackViewGravity::Leading);
+        let label = UIComponents::create_weighted_label(guide.title, 12.5, WEIGHT_MEDIUM, mtm);
+        label.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
+        label.setContentCompressionResistancePriority_forOrientation(250.0, NSLayoutConstraintOrientation::Horizontal);
+        row.addView_inGravity(&label, NSStackViewGravity::Leading);
+        view.addSubview(&row);
+
         let button = unsafe {
-            NSButton::buttonWithTitle_target_action(&NSString::from_str(guide.title), Some(target), Some(sel!(onSelectGuide:)), mtm)
+            NSButton::buttonWithTitle_target_action(&NSString::from_str(""), Some(target), Some(sel!(onSelectGuide:)), mtm)
         };
         button.setBordered(false);
+        button.setTransparent(true);
         button.setTag(idx as isize);
-        button.setFont(Some(&NSFont::systemFontOfSize_weight(12.5, WEIGHT_MEDIUM)));
-        if let Some(img) = UIComponents::symbol(guide.symbol, 13.0, WEIGHT_SEMIBOLD) {
-            button.setImage(Some(&img));
-            button.setImagePosition(NSCellImagePosition::ImageLeading);
-        }
         button.setTranslatesAutoresizingMaskIntoConstraints(false);
         view.addSubview(&button);
         UIComponents::activate(&[
-            button.leadingAnchor().constraintEqualToAnchor_constant(&view.leadingAnchor(), 10.0),
-            button.trailingAnchor().constraintEqualToAnchor_constant(&view.trailingAnchor(), -10.0),
+            row.leadingAnchor().constraintEqualToAnchor_constant(&view.leadingAnchor(), 10.0),
+            row.trailingAnchor().constraintLessThanOrEqualToAnchor_constant(&view.trailingAnchor(), -10.0),
+            row.centerYAnchor().constraintEqualToAnchor(&view.centerYAnchor()),
+            button.leadingAnchor().constraintEqualToAnchor(&view.leadingAnchor()),
+            button.trailingAnchor().constraintEqualToAnchor(&view.trailingAnchor()),
             button.topAnchor().constraintEqualToAnchor(&view.topAnchor()),
             button.bottomAnchor().constraintEqualToAnchor(&view.bottomAnchor()),
         ]);
-        Chip { view, button }
+        Chip { view, icon, label }
     }
 
     /// Shows the guide with this id (e.g. from a routine's info button).
@@ -151,11 +165,18 @@ impl GuidesView {
         for (i, chip) in self.chips.iter().enumerate() {
             let tint = guide_color(GUIDES[i].color);
             if i == idx {
-                chip.view.setFillColor(&tint.colorWithAlphaComponent(0.85));
-                chip.button.setContentTintColor(Some(&NSColor::whiteColor()));
+                chip.view.setFillColor(&tint.colorWithAlphaComponent(0.2));
+                chip.view.setBorderColor(&tint.colorWithAlphaComponent(0.6));
+                chip.view.setBorderWidth(1.0);
+                chip.icon.setContentTintColor(Some(&tint));
+                chip.label.setTextColor(Some(&NSColor::labelColor()));
+                chip.label.setFont(Some(&NSFont::systemFontOfSize_weight(12.5, WEIGHT_SEMIBOLD)));
             } else {
-                chip.view.setFillColor(&NSColor::labelColor().colorWithAlphaComponent(0.05));
-                chip.button.setContentTintColor(Some(&tint));
+                chip.view.setFillColor(&UIComponents::label_wash(0.05));
+                chip.view.setBorderWidth(0.0);
+                chip.icon.setContentTintColor(Some(&tint));
+                chip.label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+                chip.label.setFont(Some(&NSFont::systemFontOfSize_weight(12.5, WEIGHT_MEDIUM)));
             }
         }
         self.render_detail(guide);

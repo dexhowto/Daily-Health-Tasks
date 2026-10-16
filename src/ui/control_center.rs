@@ -199,7 +199,7 @@ impl ControlCenter {
         cc
     }
 
-    fn make_panel(mtm: MainThreadMarker) -> Retained<ControlCenterPanel> {
+    pub(crate) fn make_panel(mtm: MainThreadMarker) -> Retained<ControlCenterPanel> {
         let panel = ControlCenterPanel::new(mtm);
         // Always dark, independent of the system appearance.
         if let Some(dark) = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }) {
@@ -284,6 +284,7 @@ impl ControlCenter {
         if let Some(img) = UIComponents::symbol(symbol, 13.0, WEIGHT_SEMIBOLD) {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageLeading);
+            btn.setImageHugsTitle(true);
         }
         Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, 34.0, None, mtm)))
     }
@@ -943,7 +944,8 @@ impl HoverTile {
         if on {
             self.setFillColor(&ivars.tint.colorWithAlphaComponent(0.85));
         } else {
-            self.setFillColor(&NSColor::colorWithWhite_alpha(1.0, 0.08));
+            // A faint wash of the tile's own color, like the app's icon badges.
+            self.setFillColor(&ivars.tint.colorWithAlphaComponent(0.14));
         }
         if let Some(button) = ivars.button.get() {
             let tint = if on { NSColor::whiteColor() } else { ivars.tint.clone() };
