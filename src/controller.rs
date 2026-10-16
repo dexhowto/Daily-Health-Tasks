@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
@@ -7,6 +7,7 @@ use objc2_foundation::{MainThreadMarker, NSString, NSTimer};
 
 use crate::action_handler::HealthTasksActionHandler;
 use crate::activity_tracker;
+use crate::screen_recording;
 use crate::app_state;
 use crate::menu_bar::MenuBarManager;
 use crate::models::{BreakType, CoffeeKind};
@@ -22,8 +23,16 @@ pub struct AppController {
     pub mtm: MainThreadMarker,
 }
 
+/// Break notice payload: (title, message, sound, show_banner, show_alert).
+type Notice = (String, String, String, bool, bool);
+
 thread_local! {
     static CONTROLLER: RefCell<Option<AppController>> = const { RefCell::new(None) };
+    /// Notice held back while the screen is being recorded.
+    static HELD_NOTICE: RefCell<Option<Notice>> = const { RefCell::new(None) };
+    /// Break-timer completion whose dashboard pop-up is held back while recording.
+    static HELD_DASHBOARD: Cell<bool> = const { Cell::new(false) };
+    static WAS_RECORDING: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn init_controller(mtm: MainThreadMarker) {
@@ -306,31 +315,57 @@ pub fn on_timer_tick() {
         state.tick_activity_monitor(idle_seconds)
     };
 
-    // If 60 minutes of activity reached, send the customizable notice!
-    if let Some((title, message, sound, show_banner, show_alert)) = notice_due {
-        let mut mtm_opt = None;
-        CONTROLLER.with(|c| {
-            if let Some(ctrl) = c.borrow().as_ref() {
-                mtm_opt = Some(ctrl.mtm);
-            }
-        });
+    // Don't interrupt a screen recording: hold notices and pop-ups until it ends.
+    let recording = screen_recording::is_recording();
+    if recording != WAS_RECORDING.replace(recording) {
+        println!(
+            "Screen recording {}",
+            if recording { "started: holding break notices" } else { "ended" }
+        );
+    }
 
-        if let Some(mtm) = mtm_opt {
-            Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm);
+    // If the work limit is reached, send the customizable notice (or hold it).
+    if let Some(notice) = notice_due {
+        if recording {
+            HELD_NOTICE.with(|h| *h.borrow_mut() = Some(notice));
+        } else {
+            deliver_notice(notice);
+        }
+    }
+    if !recording {
+        if let Some(notice) = HELD_NOTICE.with(|h| h.borrow_mut().take()) {
+            deliver_notice(notice);
         }
     }
 
     // 2. Check manual interval countdown timer
     let completed_break = {
         let mut state = app_state::state().lock().unwrap();
-        state.tick_timer()
+        state.notice_held = HELD_NOTICE.with(|h| h.borrow().is_some());
+        state.tick_timer(recording)
     };
 
     if completed_break.is_some() {
+        HELD_DASHBOARD.set(true);
+    }
+    if !recording && HELD_DASHBOARD.replace(false) {
         show_dashboard();
     }
 
     refresh_all();
+}
+
+fn deliver_notice((title, message, sound, show_banner, show_alert): Notice) {
+    let mut mtm_opt = None;
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            mtm_opt = Some(ctrl.mtm);
+        }
+    });
+
+    if let Some(mtm) = mtm_opt {
+        Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm);
+    }
 }
 
 pub fn refresh_all() {

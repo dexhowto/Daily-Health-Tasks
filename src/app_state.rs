@@ -13,6 +13,8 @@ pub struct AppState {
     pub history: Vec<DailyRecord>,
     pub timer: TimerState,
     pub activity: ActivitySession,
+    /// A break notice is waiting for a screen recording to finish (not persisted).
+    pub notice_held: bool,
     pub settings: AppSettings,
     storage: StorageManager,
 }
@@ -29,6 +31,7 @@ impl AppState {
             history,
             timer,
             activity,
+            notice_held: false,
             settings,
             storage,
         }
@@ -114,7 +117,8 @@ impl AppState {
         }
     }
 
-    pub fn tick_timer(&mut self) -> Option<BreakType> {
+    /// `quiet` skips the finish chime (e.g. while the screen is being recorded).
+    pub fn tick_timer(&mut self, quiet: bool) -> Option<BreakType> {
         if !self.timer.is_running {
             return None;
         }
@@ -136,7 +140,7 @@ impl AppState {
                 _ => {}
             }
 
-            if self.settings.sound_enabled {
+            if self.settings.sound_enabled && !quiet {
                 SoundEffects::play_timer_finish();
             }
 

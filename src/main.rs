@@ -6,6 +6,7 @@ mod controller;
 mod menu_bar;
 mod models;
 mod notifier;
+mod screen_recording;
 mod storage;
 mod ui;
 

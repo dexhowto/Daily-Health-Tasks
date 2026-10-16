@@ -69,7 +69,11 @@ fn session_display(state: &AppState) -> SessionDisplay {
             pill: "Break due",
             tint: NSColor::systemOrangeColor(),
             value: format_mmss(worked),
-            detail: "You've reached your work limit. Time to step away.".into(),
+            detail: if state.notice_held {
+                "Screen recording in progress · notice will show when it ends".into()
+            } else {
+                "You've reached your work limit. Time to step away.".into()
+            },
             ratio: 1.0,
         },
         ActivityStatus::AwayOnBreak => SessionDisplay {
