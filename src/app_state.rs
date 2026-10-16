@@ -4,7 +4,7 @@ use chrono::Local;
 use crate::audio::SoundEffects;
 use crate::models::{
     ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
-    ExerciseEntry, ExerciseKind, TimerState, BREAK_GRACE_SECS,
+    ExerciseEntry, ExerciseKind, SavedSession, TimerState, BREAK_GRACE_SECS,
 };
 use crate::storage::StorageManager;
 
@@ -22,9 +22,10 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let storage = StorageManager::new();
-        let (today, history, settings) = storage.load_or_init();
+        let loaded = storage.load_or_init();
+        let (today, history, settings) = (loaded.today, loaded.history, loaded.settings);
         let timer = TimerState::default();
-        let activity = ActivitySession::default();
+        let activity = restore_session(loaded.session, &settings);
 
         Self {
             today,
@@ -38,7 +39,11 @@ impl AppState {
     }
 
     pub fn save(&self) {
-        self.storage.save(&self.today, &self.history, &self.settings);
+        let session = SavedSession {
+            activity: self.activity.clone(),
+            saved_at: Local::now().timestamp(),
+        };
+        self.storage.save(&self.today, &self.history, &self.settings, session);
     }
 
     pub fn add_water(&mut self, amount_ml: i32) {
@@ -170,6 +175,20 @@ impl AppState {
     ) -> Option<(String, String, String, bool, bool)> {
         self.activity.last_idle_seconds = idle_seconds;
 
+        // New day while the app runs: archive yesterday, start fresh.
+        let current_date = Local::now().format("%Y-%m-%d").to_string();
+        if crate::storage::roll_over(&mut self.today, &mut self.history, &current_date) {
+            self.save();
+        }
+
+        // Daily time on the computer (saved once a minute).
+        if idle_seconds < 60.0 {
+            self.today.active_seconds += 1;
+            if self.today.active_seconds % 60 == 0 {
+                self.save();
+            }
+        }
+
         // Just after "Take a Break": stay on break whatever the input, then
         // the next key press or mouse move starts a new session (step 2).
         if self.activity.break_grace_secs > 0 {
@@ -280,6 +299,35 @@ impl AppState {
             ActivityStatus::WaitingForInput => {
                 "⏱️ 00:00 (Ready)".to_string()
             }
+        }
+    }
+}
+
+/// Continues the work session from the last run if the app was closed for
+/// less than the idle-reset time (otherwise that gap was a break) and it's
+/// still the same day.
+fn restore_session(saved: Option<SavedSession>, settings: &AppSettings) -> ActivitySession {
+    let Some(saved) = saved else {
+        return ActivitySession::default();
+    };
+    let gap = Local::now().timestamp() - saved.saved_at;
+    let same_day = chrono::DateTime::from_timestamp(saved.saved_at, 0)
+        .map(|t| t.with_timezone(&Local).date_naive() == Local::now().date_naive())
+        .unwrap_or(false);
+    let working = matches!(
+        saved.activity.status,
+        ActivityStatus::ActiveWorking | ActivityStatus::NoticeDue
+    );
+    if working && same_day && (0..(settings.idle_reset_minutes as i64 * 60)).contains(&gap) {
+        ActivitySession {
+            break_grace_secs: 0,
+            notices_sent_today: saved.activity.notices_sent_today,
+            ..saved.activity
+        }
+    } else {
+        ActivitySession {
+            notices_sent_today: if same_day { saved.activity.notices_sent_today } else { 0 },
+            ..ActivitySession::default()
         }
     }
 }

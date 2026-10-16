@@ -108,6 +108,44 @@ define_class!(
             controller::rename_reminder(sender.stringValue().to_string());
         }
 
+        #[unsafe(method(onCalendarPrev:))]
+        fn on_calendar_prev(&self, _sender: &NSObject) {
+            controller::calendar(|c| c.show_previous_month());
+        }
+
+        #[unsafe(method(onCalendarNext:))]
+        fn on_calendar_next(&self, _sender: &NSObject) {
+            controller::calendar(|c| c.show_next_month());
+        }
+
+        #[unsafe(method(onCalendarToday:))]
+        fn on_calendar_today(&self, _sender: &NSObject) {
+            controller::calendar(|c| c.show_today());
+        }
+
+        #[unsafe(method(onCalendarMonthPicked:))]
+        fn on_calendar_month_picked(&self, sender: &objc2_app_kit::NSPopUpButton) {
+            let index = sender.indexOfSelectedItem();
+            controller::calendar(|c| c.show_picked_month(index));
+        }
+
+        #[unsafe(method(onSelectWeekDay:))]
+        fn on_select_week_day(&self, sender: &NSButton) {
+            let index = sender.tag() as usize;
+            controller::week(|c| c.select_cell(index));
+        }
+
+        #[unsafe(method(onSelectCalendarDay:))]
+        fn on_select_calendar_day(&self, sender: &NSButton) {
+            let index = sender.tag() as usize;
+            controller::calendar(|c| c.select_cell(index));
+        }
+
+        #[unsafe(method(onToggleLaunchAtLogin:))]
+        fn on_toggle_launch_at_login(&self, sender: &objc2_app_kit::NSSwitch) {
+            controller::set_launch_at_login(sender.state() == objc2_app_kit::NSControlStateValueOn);
+        }
+
         #[unsafe(method(onToggleTask:))]
         fn on_toggle_task(&self, sender: &NSButton) {
             let tag = sender.tag() as usize;

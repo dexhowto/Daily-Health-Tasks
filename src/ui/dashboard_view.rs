@@ -13,6 +13,7 @@ use crate::app_state::AppState;
 use crate::models::{
     ActivityStatus, CoffeeKind, DailyRecord, TaskCategory, CAFFEINE_CUTOFF_HOUR, CAFFEINE_LIMIT_MG,
 };
+use crate::ui::calendar_card::{CalendarCard, CalendarMode};
 use crate::ui::reminders_card::RemindersCard;
 use crate::ui::components::{
     create_page_header, ProgressBar, StatTile, UIComponents, WEIGHT_SEMIBOLD,
@@ -131,6 +132,7 @@ struct TaskRow {
 pub struct DashboardView {
     pub container: Retained<NSStackView>,
     pub reminders: RemindersCard,
+    pub week: CalendarCard,
     session_pill: Retained<NSBox>,
     session_pill_label: Retained<NSTextField>,
     session_value: Retained<NSTextField>,
@@ -209,6 +211,10 @@ impl DashboardView {
         // --- Reminders (Apple Reminders app) ---
         let reminders = RemindersCard::build(handler, mtm);
         UIComponents::add_full_width(&container, &reminders.view);
+
+        // --- This week's daily activity (full months live on Statistics) ---
+        let week = CalendarCard::build(handler, CalendarMode::Week, mtm);
+        UIComponents::add_full_width(&container, &week.view);
 
         // --- Hydration quick actions ---
         let (water_card, water_stack) = UIComponents::create_card_with_symbol(
@@ -354,6 +360,7 @@ impl DashboardView {
         let view = Self {
             container,
             reminders,
+            week,
             session_pill,
             session_pill_label,
             session_value,
@@ -374,6 +381,7 @@ impl DashboardView {
     }
 
     pub fn refresh(&self, state: &AppState) {
+        self.week.refresh(state);
         let session = session_display(state);
         self.session_pill_label.setStringValue(&NSString::from_str(session.pill));
         self.session_pill_label.setTextColor(Some(&session.tint));

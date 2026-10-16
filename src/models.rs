@@ -144,6 +144,13 @@ pub struct ActivitySession {
     pub break_grace_secs: u32,
 }
 
+/// Work session as saved to disk, with the time it was saved (Unix seconds).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedSession {
+    pub activity: ActivitySession,
+    pub saved_at: i64,
+}
+
 /// How long input is ignored after the user starts a break manually.
 pub const BREAK_GRACE_SECS: u32 = 30;
 
@@ -285,6 +292,9 @@ pub struct DailyRecord {
     pub coffee_log: Vec<CoffeeEntry>,
     #[serde(default)]
     pub exercise_log: Vec<ExerciseEntry>,
+    /// Seconds with keyboard or mouse use in the last minute.
+    #[serde(default)]
+    pub active_seconds: u32,
 }
 
 impl DailyRecord {
@@ -361,6 +371,7 @@ impl DailyRecord {
             breaks_taken: 0,
             coffee_log: Vec::new(),
             exercise_log: Vec::new(),
+            active_seconds: 0,
         }
     }
 

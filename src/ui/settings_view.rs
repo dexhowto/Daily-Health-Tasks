@@ -9,6 +9,7 @@ use objc2_foundation::{MainThreadMarker, NSArray, NSString};
 
 use crate::action_handler::HealthTasksActionHandler;
 use crate::app_state::AppState;
+use crate::login_item::{self, LoginItemState};
 use crate::ui::components::{create_page_header, UIComponents, WEIGHT_MEDIUM};
 
 /// Settings row: title and help text on the left, control on the right.
@@ -63,6 +64,8 @@ pub struct SettingsView {
     pub banner_checkbox: Retained<NSSwitch>,
     pub alert_checkbox: Retained<NSSwitch>,
     pub sound_checkbox: Retained<NSSwitch>,
+    login_switch: Retained<NSSwitch>,
+    login_note: Retained<NSTextField>,
     pub status_feedback_label: Retained<NSTextField>,
 }
 
@@ -81,6 +84,27 @@ impl SettingsView {
             mtm,
         );
         UIComponents::add_full_width(&container, &header);
+
+        // --- General ---
+        let (general_card, general_stack) = UIComponents::create_card_with_symbol(
+            "General",
+            Some(("power", &NSColor::systemGreenColor())),
+            mtm,
+        );
+        let login_switch = UIComponents::create_switch(false, target, sel!(onToggleLaunchAtLogin:), mtm);
+        UIComponents::add_full_width(
+            &general_stack,
+            &form_row(
+                "Open at login",
+                "Starts hidden: only the menu bar item and Control Center appear",
+                &login_switch,
+                mtm,
+            ),
+        );
+        let login_note = UIComponents::create_secondary_label("", 11.5, mtm);
+        login_note.setTextColor(Some(&NSColor::systemOrangeColor()));
+        general_stack.addView_inGravity(&login_note, NSStackViewGravity::Top);
+        UIComponents::add_full_width(&container, &general_card);
 
         // --- Activity monitor ---
         let (timer_card, timer_stack) = UIComponents::create_card_with_symbol(
@@ -216,15 +240,38 @@ impl SettingsView {
         action_row.addView_inGravity(&save_btn, NSStackViewGravity::Trailing);
         UIComponents::add_full_width(&container, &action_row);
 
-        Self {
+        let view = Self {
             container,
             title_field,
             message_field,
             banner_checkbox,
             alert_checkbox,
             sound_checkbox,
+            login_switch,
+            login_note,
             status_feedback_label,
-        }
+        };
+        view.update_login_item(None);
+        view
+    }
+
+    /// Syncs the "Open at login" switch with the system; `error` is shown if
+    /// the last change failed. (Not part of `refresh`: it asks launchd.)
+    pub fn update_login_item(&self, error: Option<&str>) {
+        let state = login_item::state();
+        let on = state != LoginItemState::Off;
+        self.login_switch.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+        let note = if let Some(error) = error {
+            format!("Couldn't change it: {error}")
+        } else if state == LoginItemState::NeedsApproval {
+            "Allow DexHowTo HealthTask in System Settings › General › Login Items.".to_string()
+        } else if on && !login_item::installed_in_applications() {
+            "Move the app to Applications so it keeps opening at login.".to_string()
+        } else {
+            String::new()
+        };
+        self.login_note.setStringValue(&NSString::from_str(&note));
+        self.login_note.setHidden(note.is_empty());
     }
 
     pub fn refresh(&self, state: &AppState) {

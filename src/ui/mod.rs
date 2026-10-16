@@ -1,9 +1,11 @@
+pub mod calendar_card;
 pub mod components;
 pub mod control_center;
 pub mod dashboard_view;
 pub mod history_view;
 pub mod reminders_card;
 pub mod settings_view;
+pub mod statistics_view;
 pub mod timer_view;
 
 use objc2::rc::Retained;
@@ -23,6 +25,7 @@ use crate::ui::components::{UIComponents, WEIGHT_MEDIUM, WEIGHT_SEMIBOLD};
 use crate::ui::dashboard_view::DashboardView;
 use crate::ui::history_view::HistoryView;
 use crate::ui::settings_view::SettingsView;
+use crate::ui::statistics_view::StatisticsView;
 use crate::ui::timer_view::TimerView;
 
 const SIDEBAR_WIDTH: f64 = 220.0;
@@ -30,7 +33,8 @@ const CONTENT_MAX_WIDTH: f64 = 760.0;
 
 /// Sidebar entries: (tab index, title, SF Symbol). Tab indices match the
 /// persisted `selected_tab` values, so the visual order can differ.
-const NAV_ITEMS: [(usize, &str, &str); 4] = [
+const NAV_ITEMS: [(usize, &str, &str); 5] = [
+    (4, "Statistics", "chart.xyaxis.line"),
     (0, "Today", "sun.max.fill"),
     (1, "Break Timer", "timer"),
     (3, "Insights", "chart.bar.fill"),
@@ -51,6 +55,7 @@ pub struct MainWindow {
     pub timer_view: TimerView,
     pub settings_view: SettingsView,
     pub history_view: HistoryView,
+    pub statistics_view: StatisticsView,
 }
 
 impl MainWindow {
@@ -186,11 +191,13 @@ impl MainWindow {
         let timer_view = TimerView::build(handler, state, mtm);
         let settings_view = SettingsView::build(handler, state, mtm);
         let history_view = HistoryView::build(state, mtm);
+        let statistics_view = StatisticsView::build(handler, state, mtm);
         for page in [
             &dashboard_view.container,
             &timer_view.container,
             &settings_view.container,
             &history_view.container,
+            &statistics_view.container,
         ] {
             UIComponents::add_full_width(&pages, page);
         }
@@ -237,6 +244,7 @@ impl MainWindow {
             timer_view,
             settings_view,
             history_view,
+            statistics_view,
         };
         main_window.switch_tab(state.settings.selected_tab);
         main_window
@@ -247,6 +255,7 @@ impl MainWindow {
         self.timer_view.container.setHidden(index != 1);
         self.settings_view.container.setHidden(index != 2);
         self.history_view.container.setHidden(index != 3);
+        self.statistics_view.container.setHidden(index != 4);
 
         for item in &self.nav_items {
             let selected = item.tab == index;
@@ -269,6 +278,7 @@ impl MainWindow {
         self.timer_view.refresh(state);
         self.settings_view.refresh(state);
         self.history_view.refresh(state, mtm);
+        self.statistics_view.refresh(state);
     }
 
     pub fn show(&self) {

@@ -1,8 +1,10 @@
 mod action_handler;
 mod activity_tracker;
+mod app_delegate;
 mod app_state;
 mod audio;
 mod controller;
+mod login_item;
 mod menu_bar;
 mod models;
 mod notifier;
@@ -11,6 +13,7 @@ mod screen_recording;
 mod storage;
 mod ui;
 
+use objc2::runtime::ProtocolObject;
 use objc2::sel;
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSMenu, NSMenuItem,
@@ -32,15 +35,20 @@ fn main() {
     controller::init_controller(mtm);
     reminders::start();
 
+    // App + window delegate. The dashboard is shown from
+    // applicationDidFinishLaunching, unless launched at login.
+    let delegate = app_delegate::AppDelegate::new(mtm);
+    app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    controller::set_window_delegate(ProtocolObject::from_ref(&*delegate));
+
     // Setup standard macOS Application menu bar (Quit, Window, etc.).
     // After the controller, so menu items can target its action handler.
     setup_main_menu(app.as_ref(), mtm);
 
-    // Show desktop window on launch
-    controller::show_dashboard();
-
     println!("{APP_NAME} started successfully! Running native macOS event loop...");
     app.run();
+    // Delegates are weak references; keep ours alive for the whole run.
+    drop(delegate);
 }
 
 fn setup_main_menu(app: &NSApplication, mtm: MainThreadMarker) {

@@ -337,6 +337,26 @@ pub fn complete_reminder(index: usize) {
     update_reminders();
 }
 
+/// Runs a navigation/selection change on the Statistics month calendar, then redraws.
+pub fn calendar(change: impl FnOnce(&crate::ui::calendar_card::CalendarCard)) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            change(&ctrl.main_window.statistics_view.calendar);
+        }
+    });
+    refresh_all();
+}
+
+/// Same for the "This Week" strip on Today.
+pub fn week(change: impl FnOnce(&crate::ui::calendar_card::CalendarCard)) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            change(&ctrl.main_window.dashboard_view.week);
+        }
+    });
+    refresh_all();
+}
+
 pub fn edit_reminder(index: usize) {
     CONTROLLER.with(|c| {
         if let Some(ctrl) = c.borrow().as_ref() {
@@ -388,6 +408,23 @@ pub fn toggle_control_center_collapsed() {
         state.settings.control_center_collapsed = collapsed;
         state.save();
     }
+}
+
+pub fn set_launch_at_login(enabled: bool) {
+    let error = crate::login_item::set_enabled(enabled).err();
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            ctrl.main_window.settings_view.update_login_item(error.as_deref());
+        }
+    });
+}
+
+pub fn set_window_delegate(delegate: &objc2::runtime::ProtocolObject<dyn objc2_app_kit::NSWindowDelegate>) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            ctrl.main_window.window.setDelegate(Some(delegate));
+        }
+    });
 }
 
 /// Points a main-menu item at the app's action handler.
