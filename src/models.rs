@@ -145,6 +145,13 @@ pub struct ActivitySession {
     /// The current time away has already been counted as a break.
     #[serde(default)]
     pub break_counted: bool,
+    /// On a break started with "Take a Break": input asks whether to end it
+    /// instead of starting a new session.
+    #[serde(default)]
+    pub manual_break: bool,
+    /// Input arrived during a manual break; the controller asks the user.
+    #[serde(skip)]
+    pub break_input_pending: bool,
 }
 
 /// Time away from the computer that counts as a break.
@@ -157,8 +164,14 @@ pub struct SavedSession {
     pub saved_at: i64,
 }
 
-/// How long input is ignored after the user starts a break manually.
-pub const BREAK_GRACE_SECS: u32 = 30;
+/// After the work limit, the break notice repeats this often until a break.
+pub const OVERTIME_REMINDER_SECS: u32 = 30 * 60;
+
+/// How long input is ignored after the user starts a break manually, so the
+/// click on "Take a Break" itself doesn't count.
+pub const BREAK_GRACE_SECS: u32 = 3;
+/// How long input is ignored after "Keep Resting", to step away.
+pub const KEEP_RESTING_GRACE_SECS: u32 = 30;
 
 impl Default for ActivitySession {
     fn default() -> Self {
@@ -171,6 +184,8 @@ impl Default for ActivitySession {
             notices_sent_today: 0,
             break_grace_secs: 0,
             break_counted: false,
+            manual_break: false,
+            break_input_pending: false,
         }
     }
 }

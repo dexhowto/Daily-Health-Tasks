@@ -331,7 +331,7 @@ impl ControlCenter {
         };
         self.timer_label.setStringValue(&NSString::from_str(&timer));
         let timer_color = if state.activity.status == ActivityStatus::NoticeDue {
-            NSColor::systemOrangeColor()
+            NSColor::systemRedColor()
         } else {
             NSColor::secondaryLabelColor()
         };

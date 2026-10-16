@@ -530,6 +530,20 @@ pub fn on_timer_tick() {
         }
     }
 
+    // Input during a "Take a Break" break: ask before ending it (not while
+    // recording; the break just goes on).
+    let break_input = {
+        let mut state = app_state::state().lock().unwrap();
+        std::mem::take(&mut state.activity.break_input_pending)
+    };
+    if break_input && !recording {
+        let mtm = CONTROLLER.with(|c| c.borrow().as_ref().map(|ctrl| ctrl.mtm));
+        if let Some(mtm) = mtm {
+            let back_to_work = Notifier::ask_end_break(mtm);
+            app_state::state().lock().unwrap().resolve_break_input(back_to_work);
+        }
+    }
+
     // 2. Check manual interval countdown timer
     let completed_break = {
         let mut state = app_state::state().lock().unwrap();
@@ -556,7 +570,9 @@ fn deliver_notice((title, message, sound, show_banner, show_alert): Notice) {
     });
 
     if let Some(mtm) = mtm_opt {
-        Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm);
+        if Notifier::send_notice(&title, &message, &sound, show_banner, show_alert, mtm) {
+            manual_take_break();
+        }
     }
 }
 

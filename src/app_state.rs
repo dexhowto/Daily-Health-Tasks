@@ -4,7 +4,8 @@ use chrono::Local;
 use crate::audio::SoundEffects;
 use crate::models::{
     ActivitySession, ActivityStatus, AppSettings, BreakType, CoffeeEntry, CoffeeKind, DailyRecord,
-    ExerciseEntry, ExerciseKind, SavedSession, TimerState, AWAY_BREAK_SECS, BREAK_GRACE_SECS,
+    ExerciseEntry, ExerciseKind, SavedSession, TimerState, AWAY_BREAK_SECS, BREAK_GRACE_SECS, KEEP_RESTING_GRACE_SECS,
+    OVERTIME_REMINDER_SECS,
 };
 use crate::storage::StorageManager;
 
@@ -235,11 +236,15 @@ impl AppState {
             return None;
         }
 
-        // 2. If user pressed key or moved mouse recently (< 2.0s):
+        // 2. If user pressed key or moved mouse recently (< 2.0s). A dismissed
+        //    notice (NoticeDue) keeps counting until an actual break.
         if idle_seconds < 2.0 {
+            if self.activity.manual_break && self.activity.status == ActivityStatus::AwayOnBreak {
+                self.activity.break_input_pending = true;
+                return None;
+            }
             if self.activity.status == ActivityStatus::WaitingForInput
                 || self.activity.status == ActivityStatus::AwayOnBreak
-                || self.activity.status == ActivityStatus::NoticeDue
             {
                 self.activity.status = ActivityStatus::ActiveWorking;
                 self.activity.active_work_seconds = 0;
@@ -248,14 +253,21 @@ impl AppState {
             }
         }
 
-        // 3. If actively working, count up active work seconds
-        if self.activity.status == ActivityStatus::ActiveWorking {
-            if idle_seconds < 60.0 {
-                self.activity.active_work_seconds += 1;
-            }
+        // 3. Count up active work seconds, also past the limit.
+        let working = matches!(
+            self.activity.status,
+            ActivityStatus::ActiveWorking | ActivityStatus::NoticeDue
+        );
+        if working && idle_seconds < 60.0 {
+            self.activity.active_work_seconds += 1;
+            let worked = self.activity.active_work_seconds;
 
-            // Check if limit reached!
-            if self.activity.active_work_seconds >= work_limit_secs {
+            // Notice at the limit, then again every 30 minutes over it.
+            let due = match self.activity.status {
+                ActivityStatus::ActiveWorking => worked >= work_limit_secs,
+                _ => worked > work_limit_secs && (worked - work_limit_secs) % OVERTIME_REMINDER_SECS == 0,
+            };
+            if due {
                 self.activity.status = ActivityStatus::NoticeDue;
                 // The notice is a reminder, not a break; breaks are counted
                 // when you actually step away (or use Take a Break).
@@ -281,10 +293,27 @@ impl AppState {
         self.activity.active_work_seconds = 0;
         self.activity.break_grace_secs = BREAK_GRACE_SECS;
         self.activity.break_counted = true; // counted now, not again after 10 min away
+        self.activity.manual_break = true;
+        self.activity.break_input_pending = false;
         self.activity.last_break_time = Some(Local::now().format("%H:%M:%S").to_string());
         self.today.breaks_taken += 1;
         if self.settings.sound_enabled {
             SoundEffects::play_button_click();
+        }
+        self.save();
+    }
+
+    /// Answer to the alert shown on input during a manual break.
+    pub fn resolve_break_input(&mut self, back_to_work: bool) {
+        self.activity.break_input_pending = false;
+        if back_to_work {
+            self.activity.manual_break = false;
+            self.activity.status = ActivityStatus::ActiveWorking;
+            self.activity.active_work_seconds = 0;
+            self.activity.break_counted = false;
+            self.activity.session_start_time = Some(Local::now().format("%H:%M:%S").to_string());
+        } else {
+            self.activity.break_grace_secs = KEEP_RESTING_GRACE_SECS;
         }
         self.save();
     }
@@ -304,6 +333,18 @@ impl AppState {
         }
 
         streak
+    }
+
+    /// Seconds until the next break notice: the work limit, or the next
+    /// 30-minute reminder once past it.
+    pub fn next_notice_in(&self) -> u32 {
+        let limit = self.settings.work_interval_minutes * 60;
+        let worked = self.activity.active_work_seconds;
+        if worked < limit {
+            limit - worked
+        } else {
+            OVERTIME_REMINDER_SECS - (worked - limit) % OVERTIME_REMINDER_SECS
+        }
     }
 
     pub fn menu_bar_title(&self) -> String {

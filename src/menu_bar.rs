@@ -69,11 +69,8 @@ impl MenuBarManager {
         menu.addItem(&activity_item);
 
         // 3. Notice Countdown
-        let limit_secs = state.settings.work_interval_minutes * 60;
-        let remaining = limit_secs.saturating_sub(state.activity.active_work_seconds);
-        let rem_mins = remaining / 60;
-        let rem_secs = remaining % 60;
-        let notice_title = format!("🔔 60m Break Notice in: {:02}:{:02}", rem_mins, rem_secs);
+        let remaining = state.next_notice_in();
+        let notice_title = format!("🔔 Break Notice in: {:02}:{:02}", remaining / 60, remaining % 60);
         let notice_item = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
                 mtm.alloc(),
@@ -260,11 +257,8 @@ impl MenuBarManager {
         self.activity_item
             .setTitle(&NSString::from_str(&activity_title));
 
-        let limit_secs = state.settings.work_interval_minutes * 60;
-        let remaining = limit_secs.saturating_sub(state.activity.active_work_seconds);
-        let rem_mins = remaining / 60;
-        let rem_secs = remaining % 60;
-        let notice_title = format!("🔔 60m Break Notice in: {:02}:{:02}", rem_mins, rem_secs);
+        let remaining = state.next_notice_in();
+        let notice_title = format!("🔔 Break Notice in: {:02}:{:02}", remaining / 60, remaining % 60);
         self.notice_item
             .setTitle(&NSString::from_str(&notice_title));
 

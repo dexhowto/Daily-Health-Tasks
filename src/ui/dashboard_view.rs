@@ -70,12 +70,16 @@ fn session_display(state: &AppState) -> SessionDisplay {
         },
         ActivityStatus::NoticeDue => SessionDisplay {
             pill: "Break due",
-            tint: NSColor::systemOrangeColor(),
+            tint: NSColor::systemRedColor(),
             value: format_mmss(worked),
             detail: if state.notice_held {
                 "Screen recording in progress · notice will show when it ends".into()
             } else {
-                "You've reached your work limit. Time to step away.".into()
+                format!(
+                    "{} over your limit · next reminder in {}",
+                    format_mmss(worked.saturating_sub(limit)),
+                    format_mmss(state.next_notice_in())
+                )
             },
             ratio: 1.0,
         },
@@ -83,7 +87,7 @@ fn session_display(state: &AppState) -> SessionDisplay {
             pill: "On break",
             tint: NSColor::systemGreenColor(),
             value: format_mmss(state.activity.break_grace_secs),
-            detail: "Break started · after this, any key or mouse move starts a new session".into(),
+            detail: "Break started · using the keyboard or mouse will ask whether to end it".into(),
             ratio: 0.0,
         },
         ActivityStatus::AwayOnBreak => {
@@ -93,7 +97,9 @@ fn session_display(state: &AppState) -> SessionDisplay {
                 pill: if counted { "On break" } else { "Away" },
                 tint: if counted { NSColor::systemGreenColor() } else { NSColor::systemGrayColor() },
                 value: format_mmss(away),
-                detail: if counted {
+                detail: if state.activity.manual_break {
+                    "On a break · using the keyboard or mouse will ask whether to end it".into()
+                } else if counted {
                     "Counted as a break · any key or mouse move starts a new session".into()
                 } else {
                     format!(
