@@ -1,0 +1,73 @@
+use std::fs;
+use std::path::PathBuf;
+use chrono::Local;
+use serde::{Deserialize, Serialize};
+
+use crate::models::{AppSettings, DailyRecord};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PersistentData {
+    pub today: DailyRecord,
+    pub history: Vec<DailyRecord>,
+    pub settings: AppSettings,
+}
+
+pub struct StorageManager {
+    file_path: PathBuf,
+}
+
+impl StorageManager {
+    pub fn new() -> Self {
+        let app_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("HealthTasks");
+
+        if !app_dir.exists() {
+            let _ = fs::create_dir_all(&app_dir);
+        }
+
+        let file_path = app_dir.join("health_tasks_data.json");
+        Self { file_path }
+    }
+
+    pub fn load_or_init(&self) -> (DailyRecord, Vec<DailyRecord>, AppSettings) {
+        let current_date = Local::now().format("%Y-%m-%d").to_string();
+
+        if self.file_path.exists() {
+            if let Ok(content) = fs::read_to_string(&self.file_path) {
+                if let Ok(mut data) = serde_json::from_str::<PersistentData>(&content) {
+                    // Check if date rolled over
+                    if data.today.date != current_date {
+                        // Move previous today into history if not already there
+                        if !data.history.iter().any(|h| h.date == data.today.date) {
+                            data.history.push(data.today);
+                        }
+                        // Keep last 30 days of history
+                        if data.history.len() > 30 {
+                            let excess = data.history.len() - 30;
+                            data.history.drain(0..excess);
+                        }
+                        // Start fresh today
+                        data.today = DailyRecord::with_date(&current_date);
+                    }
+                    return (data.today, data.history, data.settings);
+                }
+            }
+        }
+
+        // Default initial state
+        (DailyRecord::today(), Vec::new(), AppSettings::default())
+    }
+
+    pub fn save(&self, today: &DailyRecord, history: &[DailyRecord], settings: &AppSettings) {
+        let data = PersistentData {
+            today: today.clone(),
+            history: history.to_vec(),
+            settings: settings.clone(),
+        };
+
+        if let Ok(json) = serde_json::to_string_pretty(&data) {
+            let _ = fs::write(&self.file_path, json);
+        }
+    }
+}
