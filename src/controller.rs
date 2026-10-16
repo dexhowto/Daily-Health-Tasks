@@ -13,6 +13,7 @@ use crate::app_state;
 use crate::menu_bar::MenuBarManager;
 use crate::models::{BreakType, CoffeeKind};
 use crate::notifier::Notifier;
+use crate::ui::control_center::ControlCenter;
 use crate::ui::MainWindow;
 
 #[allow(dead_code)]
@@ -20,6 +21,7 @@ pub struct AppController {
     pub handler: Retained<HealthTasksActionHandler>,
     pub main_window: MainWindow,
     pub menu_bar: MenuBarManager,
+    pub control_center: ControlCenter,
     pub timer: Retained<NSTimer>,
     pub mtm: MainThreadMarker,
 }
@@ -42,6 +44,7 @@ pub fn init_controller(mtm: MainThreadMarker) {
 
     let main_window = MainWindow::build(&handler, &state, mtm);
     let menu_bar = MenuBarManager::build(&handler, &state, mtm);
+    let control_center = ControlCenter::build(&handler, &state, mtm);
 
     let target_ref: &AnyObject = &handler;
     let timer = unsafe {
@@ -60,6 +63,7 @@ pub fn init_controller(mtm: MainThreadMarker) {
         handler,
         main_window,
         menu_bar,
+        control_center,
         timer,
         mtm,
     };
@@ -340,13 +344,71 @@ fn update_reminders() {
         CONTROLLER.with(|c| {
             if let Some(ctrl) = c.borrow().as_ref() {
                 ctrl.main_window.dashboard_view.reminders.update(&snapshot);
+                ctrl.control_center.update_tasks(&snapshot);
             }
         });
     }
 }
 
+pub fn toggle_control_center_collapsed() {
+    let collapsed = CONTROLLER.with(|c| {
+        c.borrow().as_ref().map(|ctrl| {
+            let cc = &ctrl.control_center;
+            cc.set_collapsed(!cc.is_collapsed());
+            cc.is_collapsed()
+        })
+    });
+    if let Some(collapsed) = collapsed {
+        let mut state = app_state::state().lock().unwrap();
+        state.settings.control_center_collapsed = collapsed;
+        state.save();
+    }
+}
+
+/// Points a main-menu item at the app's action handler.
+pub fn set_menu_target(item: &objc2_app_kit::NSMenuItem) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            let target: &AnyObject = &ctrl.handler;
+            unsafe { item.setTarget(Some(target)) };
+        }
+    });
+}
+
+pub fn toggle_control_center_visible() {
+    let visible = CONTROLLER.with(|c| {
+        c.borrow().as_ref().map(|ctrl| {
+            let cc = &ctrl.control_center;
+            cc.set_visible(!cc.is_visible());
+            cc.is_visible()
+        })
+    });
+    if let Some(visible) = visible {
+        {
+            let mut state = app_state::state().lock().unwrap();
+            state.settings.control_center_visible = visible;
+            state.save();
+        }
+        refresh_all();
+    }
+}
+
+/// Saves the control center position after the user drags it.
+fn persist_control_center_position() {
+    let Some(top_left) = CONTROLLER.with(|c| c.borrow().as_ref().map(|ctrl| ctrl.control_center.top_left()))
+    else {
+        return;
+    };
+    let mut state = app_state::state().lock().unwrap();
+    if state.settings.control_center_top_left != Some(top_left) {
+        state.settings.control_center_top_left = Some(top_left);
+        state.save();
+    }
+}
+
 pub fn on_timer_tick() {
     update_reminders();
+    persist_control_center_position();
 
     let idle_seconds = activity_tracker::get_system_idle_seconds();
 
@@ -363,6 +425,11 @@ pub fn on_timer_tick() {
             "Screen recording {}",
             if recording { "started: holding break notices" } else { "ended" }
         );
+        CONTROLLER.with(|c| {
+            if let Some(ctrl) = c.borrow().as_ref() {
+                ctrl.control_center.on_recording_changed(recording);
+            }
+        });
     }
 
     // If the work limit is reached, send the customizable notice (or hold it).
@@ -414,6 +481,7 @@ pub fn refresh_all() {
     CONTROLLER.with(|c| {
         if let Some(ctrl) = c.borrow().as_ref() {
             ctrl.main_window.refresh(&state, ctrl.mtm);
+            ctrl.control_center.refresh(&state);
             ctrl.menu_bar.refresh(&state, ctrl.mtm);
         }
     });

@@ -366,6 +366,18 @@ pub struct AppSettings {
     pub show_banner_notification: bool,
     pub show_alert_dialog: bool,
     pub sound_name: String,
+    /// Floating control center: visible, collapsed to a tile, and its top-left
+    /// corner in screen coordinates (None = default spot).
+    #[serde(default = "default_true")]
+    pub control_center_visible: bool,
+    #[serde(default)]
+    pub control_center_collapsed: bool,
+    #[serde(default)]
+    pub control_center_top_left: Option<(f64, f64)>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -381,6 +393,9 @@ impl Default for AppSettings {
             show_banner_notification: true,
             show_alert_dialog: true,
             sound_name: "Glass".to_string(),
+            control_center_visible: true,
+            control_center_collapsed: false,
+            control_center_top_left: None,
         }
     }
 }

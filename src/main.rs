@@ -28,12 +28,13 @@ fn main() {
         unsafe { app.setApplicationIconImage(Some(&icon)) };
     }
 
-    // Setup standard macOS Application menu bar (Quit, Window, etc.)
-    setup_main_menu(app.as_ref(), mtm);
-
     // Initialize UI Controller (MainWindow + MenuBar status item + Timer)
     controller::init_controller(mtm);
     reminders::start();
+
+    // Setup standard macOS Application menu bar (Quit, Window, etc.).
+    // After the controller, so menu items can target its action handler.
+    setup_main_menu(app.as_ref(), mtm);
 
     // Show desktop window on launch
     controller::show_dashboard();
@@ -115,8 +116,20 @@ fn setup_main_menu(app: &NSApplication, mtm: MainThreadMarker) {
         )
     };
 
+    let control_center_item = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            mtm.alloc(),
+            &NSString::from_str("Show/Hide Control Center"),
+            Some(sel!(onToggleControlCenter:)),
+            &NSString::from_str("K"),
+        )
+    };
+    controller::set_menu_target(&control_center_item);
+
     window_menu.addItem(&minimize_item);
     window_menu.addItem(&close_item);
+    window_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    window_menu.addItem(&control_center_item);
     window_menu_item.setSubmenu(Some(&window_menu));
     main_menu.addItem(&window_menu_item);
 

@@ -15,6 +15,7 @@ pub struct MenuBarManager {
     pub coffee_item: Retained<NSMenuItem>,
     pub progress_item: Retained<NSMenuItem>,
     pub sound_item: Retained<NSMenuItem>,
+    pub control_center_item: Retained<NSMenuItem>,
 }
 
 impl MenuBarManager {
@@ -186,6 +187,18 @@ impl MenuBarManager {
         unsafe { show_dashboard.setTarget(Some(target)) };
         menu.addItem(&show_dashboard);
 
+        // 9b. Floating control center toggle
+        let control_center_item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                mtm.alloc(),
+                &NSString::from_str(control_center_title(state)),
+                Some(sel!(onToggleControlCenter:)),
+                &NSString::from_str("k"),
+            )
+        };
+        unsafe { control_center_item.setTarget(Some(target)) };
+        menu.addItem(&control_center_item);
+
         // 10. Sound Toggle
         let sound_title = if state.settings.sound_enabled {
             "🔔 Sound Effects: Enabled"
@@ -227,6 +240,7 @@ impl MenuBarManager {
             coffee_item,
             progress_item,
             sound_item,
+            control_center_item,
         }
     }
 
@@ -262,6 +276,8 @@ impl MenuBarManager {
             .setTitle(&NSString::from_str(&water_title));
         self.coffee_item
             .setTitle(&NSString::from_str(&coffee_title(state)));
+        self.control_center_item
+            .setTitle(&NSString::from_str(control_center_title(state)));
 
         let progress_title = format!(
             "📋 Today: {}/{} Habits Done ({:.0}%)",
@@ -289,4 +305,12 @@ fn coffee_title(state: &AppState) -> String {
         state.today.caffeine_mg(),
         crate::models::CAFFEINE_LIMIT_MG
     )
+}
+
+fn control_center_title(state: &AppState) -> &'static str {
+    if state.settings.control_center_visible {
+        "🎛 Hide Control Center"
+    } else {
+        "🎛 Show Control Center"
+    }
 }

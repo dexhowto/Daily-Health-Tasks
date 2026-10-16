@@ -73,6 +73,16 @@ define_class!(
             controller::complete_reminder(sender.tag() as usize);
         }
 
+        #[unsafe(method(onToggleControlCenter:))]
+        fn on_toggle_control_center(&self, _sender: &NSObject) {
+            controller::toggle_control_center_visible();
+        }
+
+        #[unsafe(method(onToggleControlCenterCollapsed:))]
+        fn on_toggle_control_center_collapsed(&self, _sender: &NSObject) {
+            controller::toggle_control_center_collapsed();
+        }
+
         #[unsafe(method(onToggleTask:))]
         fn on_toggle_task(&self, sender: &NSButton) {
             let tag = sender.tag() as usize;

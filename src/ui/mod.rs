@@ -1,4 +1,5 @@
 pub mod components;
+pub mod control_center;
 pub mod dashboard_view;
 pub mod history_view;
 pub mod reminders_card;
