@@ -13,4 +13,3 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
 objc2-event-kit = "0.3"
 block2 = "0.6"
-objc2-quartz-core = "0.3"

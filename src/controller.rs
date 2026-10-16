@@ -329,6 +329,23 @@ pub fn complete_reminder(index: usize) {
     update_reminders();
 }
 
+pub fn edit_reminder(index: usize) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            ctrl.control_center.begin_edit(index);
+        }
+    });
+}
+
+/// Saves the title typed into the control center (Return or focus loss).
+pub fn rename_reminder(title: String) {
+    let index = CONTROLLER.with(|c| c.borrow().as_ref().and_then(|ctrl| ctrl.control_center.end_edit()));
+    if let Some(index) = index {
+        reminders::rename(index, &title);
+        update_reminders();
+    }
+}
+
 fn open_url(url: &str) {
     if let Some(url) = objc2_foundation::NSURL::URLWithString(&NSString::from_str(url)) {
         objc2_app_kit::NSWorkspace::sharedWorkspace().openURL(&url);

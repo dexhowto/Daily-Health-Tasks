@@ -3,16 +3,16 @@
 //! timer, quick-log buttons, today's stats and open tasks, and collapses to a
 //! draggable tile.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSCellImagePosition, NSColor, NSControlSize, NSEvent, NSFont,
-    NSImageView, NSLayoutConstraintOrientation, NSLineBreakMode, NSPanel, NSScreen, NSStackView,
-    NSStackViewGravity, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-    NSVisualEffectState, NSVisualEffectView, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBox, NSImageView, NSLayoutConstraintOrientation,
+    NSLineBreakMode, NSPanel, NSScreen, NSStackView, NSStackViewGravity, NSTextField, NSView,
+    NSTrackingArea, NSTrackingAreaOptions, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
@@ -31,10 +31,10 @@ const MAX_TASKS: usize = 8;
 const EDGE_MARGIN: f64 = 16.0;
 
 pub struct ControlCenter {
-    pub panel: Retained<NSPanel>,
-    root: Retained<NSVisualEffectView>,
+    pub panel: Retained<ControlCenterPanel>,
+    root: Retained<NSBox>,
     expanded: Retained<NSStackView>,
-    tile: Retained<CollapsedTile>,
+    tile: Retained<DragIcon>,
     handler: Retained<HealthTasksActionHandler>,
     timer_label: Retained<NSTextField>,
     water_value: Retained<NSTextField>,
@@ -48,6 +48,11 @@ pub struct ControlCenter {
     collapsed: Cell<bool>,
     /// Collapsed automatically for a screen recording; restore when it ends.
     collapsed_for_recording: Cell<bool>,
+    /// Title fields of the visible task rows, by reminder index.
+    task_titles: RefCell<Vec<Retained<NSTextField>>>,
+    /// Task being renamed; list rebuilds wait until editing ends.
+    editing: Cell<Option<usize>>,
+    pending_snapshot: RefCell<Option<Snapshot>>,
     mtm: MainThreadMarker,
 }
 
@@ -56,15 +61,12 @@ impl ControlCenter {
         let target: &AnyObject = handler;
         let panel = Self::make_panel(mtm);
 
-        let root = NSVisualEffectView::new(mtm);
-        root.setMaterial(NSVisualEffectMaterial::HUDWindow);
-        root.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        root.setState(NSVisualEffectState::Active);
-        root.setWantsLayer(true);
-        if let Some(layer) = root.layer() {
-            layer.setCornerRadius(CORNER);
-            layer.setMasksToBounds(true);
-        }
+        // Solid near-black surface with a faint outline, readable on any background.
+        let root = UIComponents::create_rounded_box(CORNER, mtm);
+        root.setTranslatesAutoresizingMaskIntoConstraints(true);
+        root.setFillColor(&NSColor::colorWithWhite_alpha(0.06, 0.94));
+        root.setBorderColor(&NSColor::colorWithWhite_alpha(1.0, 0.14));
+        root.setBorderWidth(1.0);
         panel.setContentView(Some(&root));
 
         // --- Expanded layout ---
@@ -73,13 +75,7 @@ impl ControlCenter {
         expanded.widthAnchor().constraintEqualToConstant(WIDTH).setActive(true);
 
         let header = UIComponents::create_h_stack(8.0, mtm);
-        if let Some(icon) = UIComponents::app_icon(mtm) {
-            let logo = NSImageView::imageViewWithImage(&icon, mtm);
-            logo.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-            logo.setTranslatesAutoresizingMaskIntoConstraints(false);
-            UIComponents::pin_size(&logo, 22.0, 22.0);
-            header.addView_inGravity(&logo, NSStackViewGravity::Leading);
-        }
+        header.addView_inGravity(&DragIcon::new_handle(mtm, 22.0), NSStackViewGravity::Leading);
         header.addView_inGravity(
             &UIComponents::create_weighted_label("HealthTask", 13.0, WEIGHT_SEMIBOLD, mtm),
             NSStackViewGravity::Leading,
@@ -87,7 +83,14 @@ impl ControlCenter {
         let timer_label = UIComponents::create_secondary_label("", 12.0, mtm);
         timer_label.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(12.0, WEIGHT_MEDIUM)));
         header.addView_inGravity(&timer_label, NSStackViewGravity::Trailing);
-        let collapse = Self::icon_button("chevron.down.circle.fill", "Minimize", target, sel!(onToggleControlCenterCollapsed:), mtm);
+        let collapse = Self::icon_button(
+            "chevron.down.circle.fill",
+            15.0,
+            "Minimize",
+            target,
+            sel!(onToggleControlCenterCollapsed:),
+            mtm,
+        );
         header.addView_inGravity(&collapse, NSStackViewGravity::Trailing);
         UIComponents::add_full_width(&expanded, &header);
 
@@ -96,7 +99,7 @@ impl ControlCenter {
             ("Water", "drop.fill", NSColor::systemBlueColor(), sel!(onAddWater250:)),
             ("Coffee", "cup.and.saucer.fill", NSColor::systemBrownColor(), sel!(onAddCoffee:)),
             ("Break", "figure.walk", NSColor::systemGreenColor(), sel!(onManualTakeBreak:)),
-            ("Open", "macwindow", NSColor::labelColor(), sel!(onShowDashboard:)),
+            ("Open", "macwindow", NSColor::systemIndigoColor(), sel!(onShowDashboard:)),
         ];
         let action_views: Vec<Retained<NSView>> = actions
             .iter()
@@ -128,7 +131,7 @@ impl ControlCenter {
         UIComponents::add_full_width(&expanded, &task_rows);
 
         // --- Collapsed tile ---
-        let tile = CollapsedTile::new(mtm);
+        let tile = DragIcon::new_tile(mtm);
 
         let cc = Self {
             panel,
@@ -147,6 +150,9 @@ impl ControlCenter {
             task_rows,
             collapsed: Cell::new(state.settings.control_center_collapsed),
             collapsed_for_recording: Cell::new(false),
+            task_titles: RefCell::new(Vec::new()),
+            editing: Cell::new(None),
+            pending_snapshot: RefCell::new(None),
             mtm,
         };
         cc.refresh(state);
@@ -159,15 +165,12 @@ impl ControlCenter {
         cc
     }
 
-    fn make_panel(mtm: MainThreadMarker) -> Retained<NSPanel> {
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WIDTH, 300.0));
-        let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-            mtm.alloc(),
-            frame,
-            NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
-            NSBackingStoreType::Buffered,
-            false,
-        );
+    fn make_panel(mtm: MainThreadMarker) -> Retained<ControlCenterPanel> {
+        let panel = ControlCenterPanel::new(mtm);
+        // Always dark, independent of the system appearance.
+        if let Some(dark) = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }) {
+            panel.setAppearance(Some(&dark));
+        }
         panel.setFloatingPanel(true);
         panel.setLevel(objc2_app_kit::NSStatusWindowLevel);
         // Every Space, including full-screen apps; not part of Cmd+` cycling.
@@ -187,16 +190,23 @@ impl ControlCenter {
         panel
     }
 
-    fn icon_button(symbol: &str, tooltip: &str, target: &AnyObject, action: Sel, mtm: MainThreadMarker) -> Retained<NSButton> {
-        let btn = unsafe {
-            NSButton::buttonWithTitle_target_action(&NSString::from_str(""), Some(target), Some(action), mtm)
-        };
-        btn.setBordered(false);
-        if let Some(img) = UIComponents::symbol(symbol, 15.0, WEIGHT_MEDIUM) {
+    fn icon_button(
+        symbol: &str,
+        size: f64,
+        tooltip: &str,
+        target: &AnyObject,
+        action: Sel,
+        mtm: MainThreadMarker,
+    ) -> Retained<HoverButton> {
+        let btn = HoverButton::new(&NSColor::secondaryLabelColor(), &NSColor::controlAccentColor(), mtm);
+        unsafe {
+            btn.setTarget(Some(target));
+            btn.setAction(Some(action));
+        }
+        if let Some(img) = UIComponents::symbol(symbol, size, WEIGHT_MEDIUM) {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageOnly);
         }
-        btn.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
         btn.setToolTip(Some(&NSString::from_str(tooltip)));
         btn
     }
@@ -210,11 +220,6 @@ impl ControlCenter {
         action: Sel,
         mtm: MainThreadMarker,
     ) -> Retained<NSView> {
-        let tile = UIComponents::create_rounded_box(10.0, mtm);
-        tile.setBorderWidth(0.0);
-        tile.setFillColor(&NSColor::labelColor().colorWithAlphaComponent(0.07));
-        tile.heightAnchor().constraintEqualToConstant(58.0).setActive(true);
-
         let btn = unsafe {
             NSButton::buttonWithTitle_target_action(&NSString::from_str(title), Some(target), Some(action), mtm)
         };
@@ -224,16 +229,7 @@ impl ControlCenter {
             btn.setImage(Some(&img));
             btn.setImagePosition(NSCellImagePosition::ImageAbove);
         }
-        btn.setContentTintColor(Some(tint));
-        btn.setTranslatesAutoresizingMaskIntoConstraints(false);
-        tile.addSubview(&btn);
-        // Center the icon+title in the tile; the button keeps its natural height.
-        UIComponents::activate(&[
-            btn.leadingAnchor().constraintEqualToAnchor(&tile.leadingAnchor()),
-            btn.trailingAnchor().constraintEqualToAnchor(&tile.trailingAnchor()),
-            btn.centerYAnchor().constraintEqualToAnchor(&tile.centerYAnchor()),
-        ]);
-        Retained::into_super(tile)
+        Retained::into_super(Retained::into_super(HoverTile::new(tint, btn, mtm)))
     }
 
     fn stat_row(
@@ -302,8 +298,14 @@ impl ControlCenter {
     }
 
     pub fn update_tasks(&self, snapshot: &Snapshot) {
+        if self.editing.get().is_some() {
+            // Don't pull the text field out from under the user.
+            *self.pending_snapshot.borrow_mut() = Some(snapshot.clone());
+            return;
+        }
         let mtm = self.mtm;
         let target: &AnyObject = &self.handler;
+        let mut titles = Vec::new();
         for view in self.task_rows.arrangedSubviews().iter() {
             self.task_rows.removeArrangedSubview(&view);
             view.removeFromSuperview();
@@ -339,7 +341,17 @@ impl ControlCenter {
             let title = UIComponents::create_label(&item.title, 12.0, false, mtm);
             title.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
             title.setContentCompressionResistancePriority_forOrientation(250.0, NSLayoutConstraintOrientation::Horizontal);
+            // Becomes editable via the pencil; Return (or leaving the field) saves.
+            title.setTag(idx as isize);
+            unsafe {
+                title.setTarget(Some(target));
+                title.setAction(Some(sel!(onRenameReminder:)));
+            }
+            if let Some(cell) = title.cell() {
+                cell.setSendsActionOnEndEditing(true);
+            }
             row.addView_inGravity(&title, NSStackViewGravity::Leading);
+            titles.push(title.clone());
             let due_text = if item.is_overdue() {
                 item.due_date.map(relative_day).unwrap_or_default()
             } else {
@@ -352,6 +364,9 @@ impl ControlCenter {
                 }
                 row.addView_inGravity(&due, NSStackViewGravity::Trailing);
             }
+            let edit = Self::icon_button("pencil", 11.0, "Rename task", target, sel!(onEditReminder:), mtm);
+            edit.setTag(idx as isize);
+            row.addView_inGravity(&edit, NSStackViewGravity::Trailing);
             UIComponents::add_full_width(&self.task_rows, &row);
         }
 
@@ -369,8 +384,53 @@ impl ControlCenter {
             more.setContentTintColor(Some(&NSColor::controlAccentColor()));
             self.task_rows.addView_inGravity(&more, NSStackViewGravity::Top);
         }
+        *self.task_titles.borrow_mut() = titles;
         self.tile.set_badge(items.len());
         self.resize_keeping_top_left();
+    }
+
+    /// Turns the task title at `index` into a text field and focuses it.
+    pub fn begin_edit(&self, index: usize) {
+        if self.editing.get().is_some_and(|current| current != index) {
+            // Commit the other task first: ending editing fires its action
+            // (rename), which may also rebuild the rows.
+            self.panel.makeFirstResponder(None);
+            self.end_edit();
+        }
+        let Some(field) = self.task_titles.borrow().get(index).cloned() else {
+            return;
+        };
+        self.editing.set(Some(index));
+        Self::set_field_editing(&field, true);
+        self.panel.makeKeyWindow();
+        self.panel.makeFirstResponder(Some(&field));
+    }
+
+    /// Ends editing; returns the reminder index that was being edited.
+    pub fn end_edit(&self) -> Option<usize> {
+        let index = self.editing.take()?;
+        // Clear `editing` first: ending editing re-fires the field action.
+        self.panel.makeFirstResponder(None);
+        if let Some(field) = self.task_titles.borrow().get(index).cloned() {
+            Self::set_field_editing(&field, false);
+        }
+        if let Some(snapshot) = self.pending_snapshot.take() {
+            self.update_tasks(&snapshot);
+        }
+        Some(index)
+    }
+
+    fn set_field_editing(field: &NSTextField, editing: bool) {
+        field.setEditable(editing);
+        field.setSelectable(editing);
+        field.setBezeled(editing);
+        field.setDrawsBackground(editing);
+        if editing {
+            field.setBezelStyle(objc2_app_kit::NSTextFieldBezelStyle::RoundedBezel);
+            field.setLineBreakMode(NSLineBreakMode::ByClipping);
+        } else {
+            field.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+        }
     }
 
     // --- Visibility, collapse, position ---
@@ -430,9 +490,8 @@ impl ControlCenter {
             new.topAnchor().constraintEqualToAnchor(&self.root.topAnchor()),
             new.bottomAnchor().constraintEqualToAnchor(&self.root.bottomAnchor()),
         ]);
-        if let Some(layer) = self.root.layer() {
-            layer.setCornerRadius(if self.collapsed.get() { TILE * 0.28 } else { CORNER });
-        }
+        self.root
+            .setCornerRadius(if self.collapsed.get() { TILE * 0.28 } else { CORNER });
         self.resize_keeping_top_left();
     }
 
@@ -472,20 +531,26 @@ impl ControlCenter {
     }
 }
 
-/// Collapsed tile: app icon plus a task-count badge. Click expands, drag moves.
-pub struct CollapsedTileIvars {
+/// The DH app icon, used as the collapsed tile (with a task badge; click
+/// expands) and as the drag handle in the expanded header. Dragging it moves
+/// the panel; the move is tracked by hand because window-server drags started
+/// mid-gesture are unreliable for non-activating panels.
+pub struct DragIconIvars {
+    start_mouse: Cell<NSPoint>,
+    start_origin: Cell<NSPoint>,
     dragged: Cell<bool>,
-    badge: std::cell::OnceCell<(Retained<objc2_app_kit::NSBox>, Retained<NSTextField>)>,
+    toggles_on_click: bool,
+    badge: std::cell::OnceCell<(Retained<NSBox>, Retained<NSTextField>)>,
 }
 
 define_class!(
     #[unsafe(super(NSView))]
     #[thread_kind = MainThreadOnly]
-    #[name = "HealthTasksCollapsedTile"]
-    #[ivars = CollapsedTileIvars]
-    pub struct CollapsedTile;
+    #[name = "HealthTasksDragIcon"]
+    #[ivars = DragIconIvars]
+    pub struct DragIcon;
 
-    impl CollapsedTile {
+    impl DragIcon {
         #[unsafe(method(acceptsFirstMouse:))]
         fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
             true
@@ -502,51 +567,77 @@ define_class!(
             if inside { self as *const Self as *mut NSView } else { std::ptr::null_mut() }
         }
 
+        /// The drag is handled below, not by the window server.
+        #[unsafe(method(mouseDownCanMoveWindow))]
+        fn mouse_down_can_move_window(&self) -> bool {
+            false
+        }
+
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _event: &NSEvent) {
-            self.ivars().dragged.set(false);
+            let ivars = self.ivars();
+            ivars.dragged.set(false);
+            ivars.start_mouse.set(NSEvent::mouseLocation());
+            if let Some(window) = self.window() {
+                ivars.start_origin.set(window.frame().origin);
+            }
         }
 
         #[unsafe(method(mouseDragged:))]
-        fn mouse_dragged(&self, event: &NSEvent) {
-            if !self.ivars().dragged.replace(true) {
-                if let Some(window) = self.window() {
-                    window.performWindowDragWithEvent(event);
-                }
+        fn mouse_dragged(&self, _event: &NSEvent) {
+            let ivars = self.ivars();
+            let (start, now) = (ivars.start_mouse.get(), NSEvent::mouseLocation());
+            let (dx, dy) = (now.x - start.x, now.y - start.y);
+            // A few points of slack so a shaky click still counts as a click.
+            if !ivars.dragged.get() && dx.abs() < 3.0 && dy.abs() < 3.0 {
+                return;
+            }
+            ivars.dragged.set(true);
+            if let Some(window) = self.window() {
+                let origin = ivars.start_origin.get();
+                window.setFrameOrigin(NSPoint::new(origin.x + dx, origin.y + dy));
             }
         }
 
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, _event: &NSEvent) {
-            if !self.ivars().dragged.get() {
+            if !self.ivars().dragged.get() && self.ivars().toggles_on_click {
                 controller::toggle_control_center_collapsed();
             }
         }
     }
 );
 
-impl CollapsedTile {
-    fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = mtm.alloc::<Self>().set_ivars(CollapsedTileIvars {
+impl DragIcon {
+    fn alloc_with(mtm: MainThreadMarker, side: f64, icon_side: f64, toggles_on_click: bool) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(DragIconIvars {
+            start_mouse: Cell::new(NSPoint::new(0.0, 0.0)),
+            start_origin: Cell::new(NSPoint::new(0.0, 0.0)),
             dragged: Cell::new(false),
+            toggles_on_click,
             badge: std::cell::OnceCell::new(),
         });
-        let tile: Retained<Self> = unsafe { msg_send![super(this), init] };
-        tile.setTranslatesAutoresizingMaskIntoConstraints(false);
-        UIComponents::pin_size(&tile, TILE, TILE);
-        tile.setToolTip(Some(&NSString::from_str("HealthTask: click to expand, drag to move")));
-
+        let view: Retained<Self> = unsafe { msg_send![super(this), init] };
+        view.setTranslatesAutoresizingMaskIntoConstraints(false);
+        UIComponents::pin_size(&view, side, side);
         if let Some(icon) = UIComponents::app_icon(mtm) {
             let logo = NSImageView::imageViewWithImage(&icon, mtm);
             logo.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
             logo.setTranslatesAutoresizingMaskIntoConstraints(false);
-            tile.addSubview(&logo);
+            view.addSubview(&logo);
             UIComponents::activate(&[
-                logo.centerXAnchor().constraintEqualToAnchor(&tile.centerXAnchor()),
-                logo.centerYAnchor().constraintEqualToAnchor(&tile.centerYAnchor()),
+                logo.centerXAnchor().constraintEqualToAnchor(&view.centerXAnchor()),
+                logo.centerYAnchor().constraintEqualToAnchor(&view.centerYAnchor()),
             ]);
-            UIComponents::pin_size(&logo, 46.0, 46.0);
+            UIComponents::pin_size(&logo, icon_side, icon_side);
         }
+        view
+    }
+
+    /// Collapsed tile: icon plus task-count badge; click expands, drag moves.
+    fn new_tile(mtm: MainThreadMarker) -> Retained<Self> {
+        let tile = Self::alloc_with(mtm, TILE, 46.0, true);
+        tile.setToolTip(Some(&NSString::from_str("HealthTask: click to expand, drag to move")));
 
         let (badge_box, badge_label) = UIComponents::create_pill_badge("", &NSColor::systemOrangeColor(), mtm);
         badge_box.setFillColor(&NSColor::systemOrangeColor());
@@ -561,10 +652,208 @@ impl CollapsedTile {
         tile
     }
 
+    /// Header drag handle in the expanded panel.
+    fn new_handle(mtm: MainThreadMarker, side: f64) -> Retained<Self> {
+        let handle = Self::alloc_with(mtm, side, side, false);
+        handle.setToolTip(Some(&NSString::from_str("Drag to move")));
+        handle
+    }
+
     fn set_badge(&self, count: usize) {
         if let Some((pill, label)) = self.ivars().badge.get() {
             label.setStringValue(&NSString::from_str(&count.to_string()));
             pill.setHidden(count == 0);
+        }
+    }
+}
+
+/// Starts mouseEntered/mouseExited delivery for `view`, even while the panel
+/// isn't key (it rarely is).
+fn track_hover(view: &NSView, mtm: MainThreadMarker) {
+    let area = unsafe {
+        NSTrackingArea::initWithRect_options_owner_userInfo(
+            mtm.alloc(),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
+            NSTrackingAreaOptions::MouseEnteredAndExited
+                | NSTrackingAreaOptions::ActiveAlways
+                | NSTrackingAreaOptions::InVisibleRect,
+            Some(view),
+            None,
+        )
+    };
+    view.addTrackingArea(&area);
+}
+
+/// Quick-action tile (Water, Coffee, ...): fills with its color on hover and
+/// treats a click anywhere on the tile as a click on its button.
+pub struct HoverTileIvars {
+    tint: Retained<NSColor>,
+    button: std::cell::OnceCell<Retained<NSButton>>,
+}
+
+define_class!(
+    #[unsafe(super(NSBox))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "HealthTasksHoverTile"]
+    #[ivars = HoverTileIvars]
+    pub struct HoverTile;
+
+    impl HoverTile {
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseEntered:))]
+        fn mouse_entered(&self, _event: &NSEvent) {
+            self.set_highlighted(true);
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, _event: &NSEvent) {
+            self.set_highlighted(false);
+        }
+
+        /// Clicks on the tile's padding press the button instead of dragging the panel.
+        #[unsafe(method(mouseDownCanMoveWindow))]
+        fn mouse_down_can_move_window(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &NSEvent) {}
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) {
+            if let Some(button) = self.ivars().button.get() {
+                unsafe { button.performClick(None) };
+            }
+        }
+    }
+);
+
+impl HoverTile {
+    fn new(tint: &NSColor, button: Retained<NSButton>, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(HoverTileIvars {
+            tint: tint.retain(),
+            button: std::cell::OnceCell::new(),
+        });
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(60.0, 58.0));
+        let tile: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        tile.setBoxType(objc2_app_kit::NSBoxType::Custom);
+        tile.setTitlePosition(objc2_app_kit::NSTitlePosition::NoTitle);
+        tile.setContentViewMargins(NSSize::new(0.0, 0.0));
+        tile.setCornerRadius(10.0);
+        tile.setBorderWidth(0.0);
+        tile.setTranslatesAutoresizingMaskIntoConstraints(false);
+        tile.heightAnchor().constraintEqualToConstant(58.0).setActive(true);
+
+        button.setContentTintColor(Some(tint));
+        button.setTranslatesAutoresizingMaskIntoConstraints(false);
+        tile.addSubview(&button);
+        // Center the icon+title in the tile; the button keeps its natural height.
+        UIComponents::activate(&[
+            button.leadingAnchor().constraintEqualToAnchor(&tile.leadingAnchor()),
+            button.trailingAnchor().constraintEqualToAnchor(&tile.trailingAnchor()),
+            button.centerYAnchor().constraintEqualToAnchor(&tile.centerYAnchor()),
+        ]);
+        let _ = tile.ivars().button.set(button);
+        tile.set_highlighted(false);
+        track_hover(&tile, mtm);
+        tile
+    }
+
+    fn set_highlighted(&self, on: bool) {
+        let ivars = self.ivars();
+        if on {
+            self.setFillColor(&ivars.tint.colorWithAlphaComponent(0.85));
+        } else {
+            self.setFillColor(&NSColor::colorWithWhite_alpha(1.0, 0.08));
+        }
+        if let Some(button) = ivars.button.get() {
+            let tint = if on { NSColor::whiteColor() } else { ivars.tint.clone() };
+            button.setContentTintColor(Some(&tint));
+        }
+    }
+}
+
+/// Borderless icon button that brightens to its hover color under the mouse.
+pub struct HoverButtonIvars {
+    normal: Retained<NSColor>,
+    hover: Retained<NSColor>,
+}
+
+define_class!(
+    #[unsafe(super(NSButton))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "HealthTasksHoverButton"]
+    #[ivars = HoverButtonIvars]
+    pub struct HoverButton;
+
+    impl HoverButton {
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseEntered:))]
+        fn mouse_entered(&self, _event: &NSEvent) {
+            self.setContentTintColor(Some(&self.ivars().hover));
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, _event: &NSEvent) {
+            self.setContentTintColor(Some(&self.ivars().normal));
+        }
+    }
+);
+
+impl HoverButton {
+    fn new(normal: &NSColor, hover: &NSColor, mtm: MainThreadMarker) -> Retained<Self> {
+        let this = mtm.alloc::<Self>().set_ivars(HoverButtonIvars {
+            normal: normal.retain(),
+            hover: hover.retain(),
+        });
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(20.0, 20.0));
+        let btn: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        btn.setBordered(false);
+        btn.setTitle(&NSString::from_str(""));
+        btn.setContentTintColor(Some(normal));
+        track_hover(&btn, mtm);
+        btn
+    }
+}
+
+define_class!(
+    /// Borderless panels can't become key by default; this one can, so the
+    /// task title field accepts typing. With `becomesKeyOnlyIfNeeded` it only
+    /// takes focus for text fields, and as a non-activating panel it never
+    /// activates the app.
+    #[unsafe(super(NSPanel))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "HealthTasksControlCenterPanel"]
+    pub struct ControlCenterPanel;
+
+    impl ControlCenterPanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+    }
+);
+
+impl ControlCenterPanel {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WIDTH, 300.0));
+        let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
+        unsafe {
+            msg_send![
+                super(mtm.alloc::<Self>().set_ivars(())),
+                initWithContentRect: frame,
+                styleMask: style,
+                backing: NSBackingStoreType::Buffered,
+                defer: false
+            ]
         }
     }
 }

@@ -177,6 +177,36 @@ pub fn complete(index: usize) {
     refresh();
 }
 
+/// Renames the reminder at `index` of the last snapshot in the Reminders app.
+pub fn rename(index: usize, title: &str) {
+    let title = title.trim();
+    let Some(id) = FETCH.lock().unwrap().items.get(index).filter(|r| r.title != title).map(|r| r.id.clone())
+    else {
+        return;
+    };
+    if title.is_empty() {
+        return;
+    }
+    STORE.with(|store| unsafe {
+        let Some(item) = store.calendarItemWithIdentifier(&objc2_foundation::NSString::from_str(&id))
+        else {
+            return;
+        };
+        let Ok(reminder) = item.downcast::<EKReminder>() else {
+            return;
+        };
+        reminder.setTitle(Some(&objc2_foundation::NSString::from_str(title)));
+        if let Err(err) = store.saveReminder_commit_error(&reminder, true) {
+            eprintln!("Could not rename reminder: {}", err.localizedDescription());
+        }
+    });
+    if let Some(r) = FETCH.lock().unwrap().items.get_mut(index) {
+        r.title = title.to_string();
+    }
+    DIRTY.store(true, Ordering::SeqCst);
+    refresh();
+}
+
 fn ns_date(t: chrono::DateTime<Local>) -> Retained<NSDate> {
     NSDate::dateWithTimeIntervalSince1970(t.timestamp() as f64)
 }

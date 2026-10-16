@@ -83,6 +83,16 @@ define_class!(
             controller::toggle_control_center_collapsed();
         }
 
+        #[unsafe(method(onEditReminder:))]
+        fn on_edit_reminder(&self, sender: &NSButton) {
+            controller::edit_reminder(sender.tag() as usize);
+        }
+
+        #[unsafe(method(onRenameReminder:))]
+        fn on_rename_reminder(&self, sender: &objc2_app_kit::NSTextField) {
+            controller::rename_reminder(sender.stringValue().to_string());
+        }
+
         #[unsafe(method(onToggleTask:))]
         fn on_toggle_task(&self, sender: &NSButton) {
             let tag = sender.tag() as usize;
