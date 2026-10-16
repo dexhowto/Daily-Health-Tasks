@@ -1,4 +1,5 @@
-//! Apple Reminders integration (EventKit): open reminders due today or overdue,
+//! Apple Reminders integration (EventKit): open reminders due today or overdue
+//! (never later or undated ones),
 //! which can be completed from the app.
 //!
 //! EventKit calls back on background threads, so callbacks only record plain
@@ -235,8 +236,14 @@ fn start_fetch() {
             Some(&ns_date(end_of_today)),
             None,
         );
-        let open_block = RcBlock::new(|list: *mut NSArray<EKReminder>| {
-            let mut items = convert(list);
+        let open_block = RcBlock::new(move |list: *mut NSArray<EKReminder>| {
+            // Keep only reminders due today or overdue. The date range above
+            // isn't enough on its own: undated and all-day reminders for later
+            // days can still come back from EventKit.
+            let mut items: Vec<ReminderItem> = convert(list)
+                .into_iter()
+                .filter(|r| r.due_date.is_some_and(|d| d <= today))
+                .collect();
             // Overdue first, then by due date/time, then title.
             items.sort_by(|a, b| {
                 (a.due_date, a.due_time.clone(), a.title.to_lowercase()).cmp(&(
