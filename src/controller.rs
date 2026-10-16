@@ -188,6 +188,28 @@ pub fn set_timer_mode(mode_idx: usize) {
     refresh_all();
 }
 
+pub fn select_guide(index: usize) {
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            ctrl.main_window.guides_view.show(index);
+        }
+    });
+}
+
+/// Opens the Guides page on the guide for the daily routine at `index`.
+pub fn show_routine_guide(index: usize) {
+    let task_id = app_state::state().lock().unwrap().today.tasks.get(index).map(|t| t.id.clone());
+    let Some(guide) = task_id.as_deref().and_then(crate::guides::for_routine) else {
+        return;
+    };
+    CONTROLLER.with(|c| {
+        if let Some(ctrl) = c.borrow().as_ref() {
+            ctrl.main_window.guides_view.show_id(guide.id);
+        }
+    });
+    switch_tab(crate::ui::GUIDES_TAB);
+}
+
 pub fn switch_tab(tab_idx: usize) {
     CONTROLLER.with(|c| {
         if let Some(ctrl) = c.borrow().as_ref() {

@@ -349,7 +349,25 @@ impl DashboardView {
                 mtm,
             );
             checkbox.setControlSize(objc2_app_kit::NSControlSize::Large);
+            // Opens this routine's how-to guide.
+            let info = unsafe {
+                objc2_app_kit::NSButton::buttonWithTitle_target_action(
+                    &NSString::from_str(""),
+                    Some(target),
+                    Some(sel!(onShowRoutineGuide:)),
+                    mtm,
+                )
+            };
+            info.setBordered(false);
+            info.setTag(idx as isize);
+            if let Some(img) = UIComponents::symbol("info.circle", 14.0, 0.23) {
+                info.setImage(Some(&img));
+                info.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageOnly);
+            }
+            info.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+            info.setToolTip(Some(&NSString::from_str("How to do it")));
             row.addView_inGravity(&count, NSStackViewGravity::Trailing);
+            row.addView_inGravity(&info, NSStackViewGravity::Trailing);
             row.addView_inGravity(&checkbox, NSStackViewGravity::Trailing);
 
             UIComponents::add_full_width(&tasks_stack, &row);

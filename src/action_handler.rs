@@ -146,6 +146,16 @@ define_class!(
             controller::set_launch_at_login(sender.state() == objc2_app_kit::NSControlStateValueOn);
         }
 
+        #[unsafe(method(onSelectGuide:))]
+        fn on_select_guide(&self, sender: &NSButton) {
+            controller::select_guide(sender.tag() as usize);
+        }
+
+        #[unsafe(method(onShowRoutineGuide:))]
+        fn on_show_routine_guide(&self, sender: &NSButton) {
+            controller::show_routine_guide(sender.tag() as usize);
+        }
+
         #[unsafe(method(onToggleTask:))]
         fn on_toggle_task(&self, sender: &NSButton) {
             let tag = sender.tag() as usize;

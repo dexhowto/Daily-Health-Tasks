@@ -4,6 +4,7 @@ mod app_delegate;
 mod app_state;
 mod audio;
 mod controller;
+mod guides;
 mod login_item;
 mod menu_bar;
 mod models;
