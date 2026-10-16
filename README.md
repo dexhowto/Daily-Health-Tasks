@@ -2,6 +2,18 @@
 
 **DexHowTo HealthTask** is a 100% pure Rust native macOS desktop and menu bar companion engineered for software engineers, developers, and desk workers. It runs silently in the background, monitors keyboard and mouse activity across macOS, tracks active work sessions, and delivers customizable health break notices.
 
+It also tracks water and coffee, shows today's Apple Reminders, keeps a floating Control Center on top of every window (even full-screen apps), and stays quiet while you record your screen.
+
+## 📦 Download
+
+Grab the latest macOS build from the [Releases page](https://github.com/dexhowto/Daily-Health-Tasks/releases): unzip it and move **DexHowTo HealthTask.app** to `/Applications`.
+
+The app is not notarized by Apple, so the first launch is blocked by Gatekeeper. Either right-click the app and choose **Open**, or go to **System Settings › Privacy & Security** and click **Open Anyway**. From Terminal you can also run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/DexHowTo HealthTask.app"
+```
+
 ---
 
 ## ✨ Features
@@ -42,9 +54,30 @@ On the **Settings** page, you can customize:
 ### 4. 📋 Desktop Dashboard (`NSWindow`)
 - **Sidebar layout**: Today, Break Timer, Insights and Settings pages with SF Symbols, card-based content and live work-session status.
 - **Daily Health Routines Checklist**: Water, 20-20-20 eye breaks, stand & stretch, ergonomic posture alignment, 30-minute movement, screen-free meal, and daily vitamins.
-- **Hydration Tracker**: Interactive stepper with progress bar toward a 2,000ml daily target.
+- **Hydration Tracker**: Quick buttons (glass 250 ml, bottle 500 ml, undo) with progress toward a 2,000 ml daily target.
 - **Micro-Break Countdown Timers**: Dedicated 20-20-20 eye break rule, 45m stretch session, and 5m deep breathing.
-- **7-Day History & Insights**: Daily completion percentages, water volume consumed, break counts, streak tracking (`🔥 5 Days`), and ergonomic desk guides.
+- **7-Day History & Insights**: Daily completion percentages, water, coffee and break counts, streak tracking, and ergonomic desk guides.
+
+### 5. ☕ Coffee & Caffeine Tracking
+- Log an **Espresso (63 mg)**, **Coffee (95 mg)** or **Latte (126 mg)** with one click; undo the last entry.
+- Caffeine total against the **400 mg** daily guideline, with a bar that turns amber near the limit and red over it.
+- Tips such as "Caffeine after 14:00 can make it harder to sleep tonight", plus a coffee column in Insights and a quick-log item in the menu bar (`c`).
+
+### 6. ✅ Apple Reminders
+- The **Reminders** card on the Today page lists open reminders due today, overdue ones first.
+- Tick a reminder to complete it in the Reminders app; the list updates when Reminders changes.
+- Asks for Reminders access the first time you click **Connect Reminders**.
+
+### 7. 🎛 Floating Control Center
+- A small black vertical panel that stays **above other windows on every Space, including full-screen apps**, and can be dragged to any screen.
+- Session timer, quick buttons (**Water, Coffee, Break**), water / caffeine / habits bars, open tasks with checkboxes, and an **Open Dashboard** button.
+- Rename a task in place with the pencil button (saved to Reminders).
+- Minimize it to a draggable **DH** tile with a task-count badge; click the tile to expand.
+- Show or hide it from the menu bar or **Window › Show/Hide Control Center** (`⌘⇧K`). Position and state are remembered.
+
+### 8. 🎥 Screen Recording Aware
+- While the screen is being recorded (any recorder, including Cmd+Shift+5, QuickTime and DexHowTo Recorder), break notices, chimes and pop-ups are **held** and delivered as soon as the recording stops.
+- The Control Center collapses to its tile during the recording and expands again afterwards.
 
 ---
 
@@ -52,8 +85,10 @@ On the **Settings** page, you can customize:
 
 DexHowTo HealthTask is built 100% in Rust using modern Apple AppKit bindings (`objc2`, `objc2-app-kit`, `objc2-foundation`):
 - **Language**: Rust (2024 edition)
-- **GUI Engine**: Native macOS Cocoa / AppKit (`NSApplication`, `NSWindow`, `NSStatusItem`, `NSStackView`, `NSBox`, `NSButton`, `NSTextField`, `NSProgressIndicator`, `NSSegmentedControl`, `NSAlert`, `NSSound`)
+- **GUI Engine**: Native macOS Cocoa / AppKit (`NSApplication`, `NSWindow`, `NSPanel`, `NSStatusItem`, `NSStackView`, `NSBox`, `NSButton`, `NSTextField`, `NSSegmentedControl`, `NSAlert`, `NSSound`)
 - **Activity Detection**: `CoreGraphics` (`CGEventSourceSecondsSinceLastEventType`)
+- **Reminders**: `EventKit` (`objc2-event-kit`)
+- **Screen Recording Detection**: macOS privacy indicator window (`CGWindowListCopyWindowInfo`) and capture processes (`libproc`)
 - **Storage**: JSON file stored in `~/Library/Application Support/HealthTasks/health_tasks_data.json`
 
 ```
@@ -68,13 +103,22 @@ src/
 ├── menu_bar.rs          # NSStatusItem companion and dynamic dropdown menu
 ├── action_handler.rs    # Objective-C event target class (buttons, menus, timer)
 ├── controller.rs        # App coordination between event loop, state, and UI
+├── reminders.rs         # EventKit: today's open reminders, complete & rename
+├── screen_recording.rs  # Detects screen recording to hold notices
 └── ui/
-    ├── mod.rs           # MainWindow layout & tab coordinator
-    ├── components.rs    # AppKit view builders (buttons, labels, cards, text fields)
-    ├── dashboard_view.rs# Today's Checklist, Hydration tracker, Streak badge
-    ├── timer_view.rs    # Micro-break timers & ergonomic instructions
-    ├── settings_view.rs # Customizable 60-minute notice, title, message & delivery
-    └── history_view.rs  # 7-day stats & ergonomics guide
+    ├── mod.rs              # MainWindow sidebar layout & page coordinator
+    ├── components.rs       # AppKit view builders (cards, tiles, progress bars, labels)
+    ├── dashboard_view.rs   # Today: session, stats, hydration, coffee, routines
+    ├── reminders_card.rs   # Today: Apple Reminders card
+    ├── control_center.rs   # Floating always-on-top Control Center panel
+    ├── timer_view.rs       # Micro-break timers & instructions
+    ├── settings_view.rs    # Notice timing, wording & delivery
+    └── history_view.rs     # 7-day insights & ergonomics guide
+
+Info.plist                  # Bundle metadata (embedded into the binary by build.rs)
+assets/                     # App icon (AppIcon.icns, icon_1024.png)
+scripts/bundle_app.sh       # Builds the .app bundle (UNIVERSAL=1 for Intel + Apple Silicon)
+scripts/make_icon.swift     # Regenerates the app icon
 ```
 
 ---
@@ -96,6 +140,11 @@ To create a standalone macOS `.app` bundle ready to run or copy to `/Application
 ```bash
 ./scripts/bundle_app.sh
 open "target/release/DexHowTo HealthTask.app"
+```
+
+To build a universal app (Apple Silicon + Intel) and a zip for distribution:
+```bash
+UNIVERSAL=1 ./scripts/bundle_app.sh
 ```
 
 ---
