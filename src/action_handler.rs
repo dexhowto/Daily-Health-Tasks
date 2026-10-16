@@ -58,6 +58,21 @@ define_class!(
             controller::log_coffee(None);
         }
 
+        #[unsafe(method(onConnectReminders:))]
+        fn on_connect_reminders(&self, _sender: &NSObject) {
+            controller::connect_reminders();
+        }
+
+        #[unsafe(method(onOpenReminders:))]
+        fn on_open_reminders(&self, _sender: &NSObject) {
+            controller::open_reminders_app();
+        }
+
+        #[unsafe(method(onToggleReminder:))]
+        fn on_toggle_reminder(&self, sender: &NSButton) {
+            controller::complete_reminder(sender.tag() as usize);
+        }
+
         #[unsafe(method(onToggleTask:))]
         fn on_toggle_task(&self, sender: &NSButton) {
             let tag = sender.tag() as usize;

@@ -6,6 +6,7 @@ mod controller;
 mod menu_bar;
 mod models;
 mod notifier;
+mod reminders;
 mod screen_recording;
 mod storage;
 mod ui;
@@ -32,6 +33,7 @@ fn main() {
 
     // Initialize UI Controller (MainWindow + MenuBar status item + Timer)
     controller::init_controller(mtm);
+    reminders::start();
 
     // Show desktop window on launch
     controller::show_dashboard();

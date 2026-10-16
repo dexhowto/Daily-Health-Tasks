@@ -13,6 +13,7 @@ use crate::app_state::AppState;
 use crate::models::{
     ActivityStatus, CoffeeKind, DailyRecord, TaskCategory, CAFFEINE_CUTOFF_HOUR, CAFFEINE_LIMIT_MG,
 };
+use crate::ui::reminders_card::RemindersCard;
 use crate::ui::components::{
     create_page_header, ProgressBar, StatTile, UIComponents, WEIGHT_SEMIBOLD,
 };
@@ -122,6 +123,7 @@ struct TaskRow {
 
 pub struct DashboardView {
     pub container: Retained<NSStackView>,
+    pub reminders: RemindersCard,
     session_pill: Retained<NSBox>,
     session_pill_label: Retained<NSTextField>,
     session_value: Retained<NSTextField>,
@@ -196,6 +198,10 @@ impl DashboardView {
             mtm,
         );
         UIComponents::add_full_width(&container, &tiles);
+
+        // --- Reminders (Apple Reminders app) ---
+        let reminders = RemindersCard::build(handler, mtm);
+        UIComponents::add_full_width(&container, &reminders.view);
 
         // --- Hydration quick actions ---
         let (water_card, water_stack) = UIComponents::create_card_with_symbol(
@@ -340,6 +346,7 @@ impl DashboardView {
 
         let view = Self {
             container,
+            reminders,
             session_pill,
             session_pill_label,
             session_value,

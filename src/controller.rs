@@ -7,6 +7,7 @@ use objc2_foundation::{MainThreadMarker, NSString, NSTimer};
 
 use crate::action_handler::HealthTasksActionHandler;
 use crate::activity_tracker;
+use crate::reminders;
 use crate::screen_recording;
 use crate::app_state;
 use crate::menu_bar::MenuBarManager;
@@ -306,7 +307,47 @@ pub fn test_notice() {
     }
 }
 
+pub fn connect_reminders() {
+    match reminders::access() {
+        reminders::Access::Denied => open_url(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders",
+        ),
+        _ => reminders::request_access(),
+    }
+}
+
+pub fn open_reminders_app() {
+    open_url("x-apple-reminderkit://");
+}
+
+pub fn complete_reminder(index: usize) {
+    reminders::complete(index);
+    update_reminders();
+}
+
+fn open_url(url: &str) {
+    if let Some(url) = objc2_foundation::NSURL::URLWithString(&NSString::from_str(url)) {
+        objc2_app_kit::NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+}
+
+/// Pulls fresh reminders data (if any) into the Today page.
+fn update_reminders() {
+    if let Some(snapshot) = reminders::poll() {
+        if let reminders::Snapshot::Items(items) = &snapshot {
+            println!("Reminders: {} open for today", items.len());
+        }
+        CONTROLLER.with(|c| {
+            if let Some(ctrl) = c.borrow().as_ref() {
+                ctrl.main_window.dashboard_view.reminders.update(&snapshot);
+            }
+        });
+    }
+}
+
 pub fn on_timer_tick() {
+    update_reminders();
+
     let idle_seconds = activity_tracker::get_system_idle_seconds();
 
     // 1. Check background keyboard and mouse activity
