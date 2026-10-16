@@ -6,7 +6,9 @@ use objc2_foundation::MainThreadMarker;
 use crate::action_handler::HealthTasksActionHandler;
 use crate::app_state::AppState;
 use crate::models::{DailyRecord, CAFFEINE_LIMIT_MG};
-use crate::ui::calendar_card::{exercised, format_active, water_goal_met, CalendarCard, CalendarMode};
+use crate::ui::calendar_card::{
+    exercised, format_active, format_active_short, water_goal_met, CalendarCard, CalendarMode,
+};
 use crate::ui::components::{create_page_header, StatTile, UIComponents};
 use crate::ui::dashboard_view::caffeine_tint;
 
@@ -94,9 +96,8 @@ impl StatisticsView {
 
         let active: u32 = days.iter().map(|d| d.active_seconds).sum();
         let tracked = days.iter().filter(|d| d.active_seconds > 0).count().max(1) as u32;
-        let (hours, minutes) = (active / 3600, active / 60 % 60);
         self.active_tile.update(
-            &if hours > 0 { format!("{hours}h {minutes}m") } else { format!("{minutes}m") },
+            &format_active_short(active),
             &format!("avg {} per day", format_active(active / tracked)),
             0.0,
         );

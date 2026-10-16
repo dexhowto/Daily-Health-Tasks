@@ -36,6 +36,7 @@ pub enum CalendarMode {
 struct DayCell {
     view: Retained<NSBox>,
     number: Retained<NSTextField>,
+    active: Retained<NSTextField>,
     water: Retained<NSImageView>,
     exercise: Retained<NSImageView>,
 }
@@ -123,6 +124,12 @@ fn exercise_summary(day: &DailyRecord) -> String {
         (0, s) => format!("{s} stretch sessions"),
         (m, s) => format!("{m} min movement · {s} stretch sessions"),
     }
+}
+
+/// Compact duration for tight spots: "3h 12m", "45m".
+pub fn format_active_short(secs: u32) -> String {
+    let (hours, minutes) = (secs / 3600, secs / 60 % 60);
+    if hours > 0 { format!("{hours}h {minutes}m") } else { format!("{minutes}m") }
 }
 
 pub fn format_active(secs: u32) -> String {
@@ -227,6 +234,7 @@ impl CalendarCard {
         for (symbol, tint, text) in [
             ("drop.fill", NSColor::systemBlueColor(), "Water goal met"),
             ("figure.run", NSColor::systemOrangeColor(), "Exercised"),
+            ("desktopcomputer", NSColor::systemIndigoColor(), "Time on computer"),
         ] {
             legend.addView_inGravity(&UIComponents::create_symbol_view(symbol, 10.0, &tint, mtm), NSStackViewGravity::Leading);
             legend.addView_inGravity(&UIComponents::create_secondary_label(text, 11.0, mtm), NSStackViewGravity::Leading);
@@ -286,8 +294,12 @@ impl CalendarCard {
         let icons = UIComponents::create_h_stack(3.0, mtm);
         icons.addView_inGravity(&water, NSStackViewGravity::Leading);
         icons.addView_inGravity(&exercise, NSStackViewGravity::Leading);
+        // Time active on the computer that day.
+        let active = UIComponents::create_secondary_label("", 10.0, mtm);
+        active.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(10.0, WEIGHT_MEDIUM)));
+        active.setTextColor(Some(&NSColor::systemIndigoColor()));
 
-        for sub in [&*number as &NSView, &icons] {
+        for sub in [&*number as &NSView, &icons, &active] {
             sub.setTranslatesAutoresizingMaskIntoConstraints(false);
             view.addSubview(sub);
         }
@@ -304,12 +316,14 @@ impl CalendarCard {
             number.leadingAnchor().constraintEqualToAnchor_constant(&view.leadingAnchor(), 8.0),
             icons.bottomAnchor().constraintEqualToAnchor_constant(&view.bottomAnchor(), -6.0),
             icons.leadingAnchor().constraintEqualToAnchor_constant(&view.leadingAnchor(), 8.0),
+            active.trailingAnchor().constraintEqualToAnchor_constant(&view.trailingAnchor(), -6.0),
+            active.centerYAnchor().constraintEqualToAnchor(&icons.centerYAnchor()),
             button.leadingAnchor().constraintEqualToAnchor(&view.leadingAnchor()),
             button.trailingAnchor().constraintEqualToAnchor(&view.trailingAnchor()),
             button.topAnchor().constraintEqualToAnchor(&view.topAnchor()),
             button.bottomAnchor().constraintEqualToAnchor(&view.bottomAnchor()),
         ]);
-        DayCell { view, number, water, exercise }
+        DayCell { view, number, active, water, exercise }
     }
 
     fn build_detail_row(label: &str, mtm: MainThreadMarker) -> (Retained<NSStackView>, DetailRow) {
@@ -408,6 +422,12 @@ impl CalendarCard {
             cell.number.setTextColor(Some(&number_color));
             cell.water.setHidden(!day.is_some_and(water_goal_met));
             cell.exercise.setHidden(!day.is_some_and(exercised));
+            let active = day.map_or(0, |d| d.active_seconds);
+            cell.active.setStringValue(&NSString::from_str(&if active >= 60 {
+                format_active_short(active)
+            } else {
+                String::new()
+            }));
 
             let fill = if date == selected {
                 NSColor::controlAccentColor().colorWithAlphaComponent(0.22)

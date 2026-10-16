@@ -5,12 +5,15 @@
 
 use std::cell::{Cell, RefCell};
 
+use block2::RcBlock;
+
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSBackingStoreType, NSButton, NSCellImagePosition, NSColor, NSControlSize, NSEvent, NSFont,
-    NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBox, NSImage, NSImageView, NSLayoutConstraintOrientation,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSAppearance, NSAppearanceCustomization,
+    NSAppearanceNameDarkAqua, NSApplication, NSBox, NSImage, NSImageView, NSLayoutConstraintOrientation,
     NSLineBreakMode, NSPanel, NSScreen, NSStackView, NSStackViewGravity, NSTextField, NSView,
     NSTrackingArea, NSTrackingAreaOptions, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -22,6 +25,7 @@ use crate::controller;
 use crate::models::{ActivityStatus, CAFFEINE_LIMIT_MG};
 use crate::reminders::{relative_day, Access, Snapshot};
 use crate::ui::components::{ProgressBar, UIComponents, WEIGHT_MEDIUM, WEIGHT_SEMIBOLD};
+use crate::ui::calendar_card::format_active_short;
 use crate::ui::dashboard_view::caffeine_tint;
 
 const WIDTH: f64 = 272.0;
@@ -43,6 +47,7 @@ pub struct ControlCenter {
     coffee_bar: ProgressBar,
     habits_value: Retained<NSTextField>,
     habits_bar: ProgressBar,
+    computer_value: Retained<NSTextField>,
     tasks_caption: Retained<NSTextField>,
     task_rows: Retained<NSStackView>,
     collapsed: Cell<bool>,
@@ -126,8 +131,12 @@ impl ControlCenter {
             Self::stat_row("cup.and.saucer.fill", "Caffeine", &NSColor::systemBrownColor(), mtm);
         let (habits_row, habits_value, habits_bar) =
             Self::stat_row("checkmark.circle.fill", "Habits", &NSColor::systemGreenColor(), mtm);
+        // Time on the computer today has no goal, so no bar.
+        let (computer_row, computer_value, computer_bar) =
+            Self::stat_row("desktopcomputer", "Computer", &NSColor::systemIndigoColor(), mtm);
+        computer_bar.track.setHidden(true);
         let stats = UIComponents::create_v_stack(7.0, mtm);
-        for row in [&water_row, &coffee_row, &habits_row] {
+        for row in [&water_row, &coffee_row, &habits_row, &computer_row] {
             UIComponents::add_full_width(&stats, row);
         }
         UIComponents::add_full_width(&expanded, &stats);
@@ -170,6 +179,7 @@ impl ControlCenter {
             coffee_bar,
             habits_value,
             habits_bar,
+            computer_value,
             tasks_caption,
             task_rows,
             collapsed: Cell::new(state.settings.control_center_collapsed),
@@ -344,6 +354,9 @@ impl ControlCenter {
             today.tasks.len()
         )));
         self.habits_bar.set_ratio(today.completion_ratio());
+
+        self.computer_value
+            .setStringValue(&NSString::from_str(&format_active_short(today.active_seconds)));
     }
 
     pub fn update_tasks(&self, snapshot: &Snapshot) {
@@ -733,14 +746,24 @@ fn track_hover(view: &NSView, mtm: MainThreadMarker) {
     view.addTrackingArea(&area);
 }
 
+/// How long a quick action shows its checkmark and ignores clicks.
+const CONFIRM_SECS: f64 = 5.0;
+
 /// Quick-action tile (Water, Coffee, ...): fills with its color on hover and
-/// treats a click anywhere on the tile as a click on its button.
+/// treats a click anywhere on the tile as a click on its button. Tiles with a
+/// hover image (the plus) also confirm a click: the icon fades into a
+/// checkmark for a few seconds, during which further clicks are ignored.
 pub struct HoverTileIvars {
     tint: Retained<NSColor>,
     button: std::cell::OnceCell<Retained<NSButton>>,
     /// Button icon, and the one shown while hovered (e.g. a plus), if any.
     image: Option<Retained<NSImage>>,
     hover_image: Option<Retained<NSImage>>,
+    check_image: Option<Retained<NSImage>>,
+    /// The button's real target/action; the tile sits in between.
+    forward: std::cell::OnceCell<(Retained<AnyObject>, Sel)>,
+    hovering: Cell<bool>,
+    confirming: Cell<bool>,
 }
 
 define_class!(
@@ -758,12 +781,41 @@ define_class!(
 
         #[unsafe(method(mouseEntered:))]
         fn mouse_entered(&self, _event: &NSEvent) {
+            self.ivars().hovering.set(true);
             self.set_highlighted(true);
         }
 
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, _event: &NSEvent) {
+            self.ivars().hovering.set(false);
             self.set_highlighted(false);
+        }
+
+        /// The button's click lands here first: run the real action once, then
+        /// show the checkmark.
+        #[unsafe(method(tileActivated:))]
+        fn tile_activated(&self, sender: &NSButton) {
+            let ivars = self.ivars();
+            if ivars.confirming.get() {
+                return;
+            }
+            if let Some((target, action)) = ivars.forward.get() {
+                let app = NSApplication::sharedApplication(self.mtm());
+                unsafe { app.sendAction_to_from(*action, Some(target), Some(sender)) };
+            }
+            self.start_confirmation();
+        }
+
+        #[unsafe(method(endConfirmation:))]
+        fn end_confirmation(&self, _sender: Option<&AnyObject>) {
+            let ivars = self.ivars();
+            ivars.confirming.set(false);
+            let hovering = ivars.hovering.get();
+            self.set_colors(hovering);
+            if let Some(button) = ivars.button.get() {
+                let image = if hovering { ivars.hover_image.clone() } else { ivars.image.clone() };
+                Self::crossfade(button, image);
+            }
         }
 
         /// Clicks on the tile's padding press the button instead of dragging the panel.
@@ -792,11 +844,16 @@ impl HoverTile {
         hover_image: Option<Retained<NSImage>>,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
+        let confirms = hover_image.is_some();
         let this = mtm.alloc::<Self>().set_ivars(HoverTileIvars {
             tint: tint.retain(),
             button: std::cell::OnceCell::new(),
             image: button.image(),
             hover_image,
+            check_image: UIComponents::symbol("checkmark.circle.fill", 16.0, WEIGHT_SEMIBOLD),
+            forward: std::cell::OnceCell::new(),
+            hovering: Cell::new(false),
+            confirming: Cell::new(false),
         });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(60.0, height));
         let tile: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
@@ -817,13 +874,68 @@ impl HoverTile {
             button.trailingAnchor().constraintEqualToAnchor(&tile.trailingAnchor()),
             button.centerYAnchor().constraintEqualToAnchor(&tile.centerYAnchor()),
         ]);
+        if confirms {
+            if let (Some(target), Some(action)) = (button.target(), button.action()) {
+                let _ = tile.ivars().forward.set((target, action));
+                let tile_target: &AnyObject = &tile;
+                unsafe {
+                    button.setTarget(Some(tile_target));
+                    button.setAction(Some(sel!(tileActivated:)));
+                }
+            }
+        }
         let _ = tile.ivars().button.set(button);
         tile.set_highlighted(false);
         track_hover(&tile, mtm);
         tile
     }
 
-    fn set_highlighted(&self, on: bool) {
+    fn start_confirmation(&self) {
+        let ivars = self.ivars();
+        ivars.confirming.set(true);
+        self.setFillColor(&NSColor::systemGreenColor().colorWithAlphaComponent(0.85));
+        if let Some(button) = ivars.button.get() {
+            button.setContentTintColor(Some(&NSColor::whiteColor()));
+            Self::crossfade(button, ivars.check_image.clone());
+        }
+        unsafe {
+            let _: () = msg_send![
+                self,
+                performSelector: sel!(endConfirmation:),
+                withObject: Option::<&AnyObject>::None,
+                afterDelay: CONFIRM_SECS
+            ];
+        }
+    }
+
+    /// Fades the button out, swaps its icon and fades it back in.
+    fn crossfade(button: &NSButton, image: Option<Retained<NSImage>>) {
+        let fade_out = RcBlock::new({
+            let button = button.retain();
+            move |ctx: std::ptr::NonNull<NSAnimationContext>| {
+                unsafe { ctx.as_ref() }.setDuration(0.12);
+                button.animator().setAlphaValue(0.0);
+            }
+        });
+        let fade_in = RcBlock::new({
+            let button = button.retain();
+            move || {
+                if let Some(image) = &image {
+                    button.setImage(Some(image));
+                }
+                let button = button.clone();
+                let changes = RcBlock::new(move |ctx: std::ptr::NonNull<NSAnimationContext>| {
+                    unsafe { ctx.as_ref() }.setDuration(0.18);
+                    button.animator().setAlphaValue(1.0);
+                });
+                NSAnimationContext::runAnimationGroup(&changes);
+            }
+        });
+        NSAnimationContext::runAnimationGroup_completionHandler(&fade_out, Some(&fade_in));
+    }
+
+    /// Fill and icon color for the normal or hovered look.
+    fn set_colors(&self, on: bool) {
         let ivars = self.ivars();
         if on {
             self.setFillColor(&ivars.tint.colorWithAlphaComponent(0.85));
@@ -833,6 +945,16 @@ impl HoverTile {
         if let Some(button) = ivars.button.get() {
             let tint = if on { NSColor::whiteColor() } else { ivars.tint.clone() };
             button.setContentTintColor(Some(&tint));
+        }
+    }
+
+    fn set_highlighted(&self, on: bool) {
+        let ivars = self.ivars();
+        if ivars.confirming.get() {
+            return; // keep the checkmark until it expires
+        }
+        self.set_colors(on);
+        if let Some(button) = ivars.button.get() {
             if let Some(hover_image) = &ivars.hover_image {
                 let image = if on { Some(hover_image) } else { ivars.image.as_ref() };
                 button.setImage(image.map(|i| &**i));
